@@ -427,3 +427,68 @@ func TestEnsureReleaseBindingRuntimeClass_SkipsWriteWhenAlreadyCorrect(t *testin
 	require.NoError(t, c.EnsureReleaseBindingRuntimeClass(context.Background(), "acme", "myagent", "dev", "gvisor"))
 	assert.Equal(t, 0, *puts)
 }
+
+func TestGetReleaseBindingServiceURL(t *testing.T) {
+	port := int32(8000)
+	https := "https"
+	withEndpoints := func(env string, eps *[]gen.EndpointURLStatus) gen.ReleaseBinding {
+		b := bindingWithConfigs(nil, nil)
+		b.Metadata.Name = "myagent-" + env
+		b.Spec.Environment = env
+		b.Status = &gen.ReleaseBindingStatus{Endpoints: eps}
+		return b
+	}
+	serve := func(t *testing.T, status int, items ...gen.ReleaseBinding) *openChoreoClient {
+		t.Helper()
+		return newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, http.MethodGet, r.Method)
+			require.True(t, strings.HasSuffix(r.URL.Path, "/releasebindings"), r.URL.Path)
+			w.WriteHeader(status)
+			if status == http.StatusOK {
+				require.NoError(t, json.NewEncoder(w).Encode(gen.ReleaseBindingList{Items: items}))
+				return
+			}
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]string{"error": "boom"}))
+		}))
+	}
+
+	t.Run("picks the environment's first endpoint with a host and defaults the scheme to http", func(t *testing.T) {
+		c := serve(
+			t, http.StatusOK,
+			withEndpoints("prod", &[]gen.EndpointURLStatus{{Name: "a", ServiceURL: &gen.EndpointURL{Host: "prod.svc", Port: &port}}}),
+			withEndpoints("dev", &[]gen.EndpointURLStatus{
+				{Name: "blank", ServiceURL: &gen.EndpointURL{Host: " "}},
+				{Name: "a", ServiceURL: &gen.EndpointURL{Host: "dev.svc", Port: &port}},
+			}),
+		)
+		got, err := c.GetReleaseBindingServiceURL(context.Background(), "acme", "myagent", "dev")
+		require.NoError(t, err)
+		assert.Equal(t, "http://dev.svc:8000", got)
+	})
+
+	t.Run("keeps an explicit scheme", func(t *testing.T) {
+		c := serve(t, http.StatusOK,
+			withEndpoints("dev", &[]gen.EndpointURLStatus{{Name: "a", ServiceURL: &gen.EndpointURL{Host: "dev.svc", Scheme: &https}}}))
+		got, err := c.GetReleaseBindingServiceURL(context.Background(), "acme", "myagent", "dev")
+		require.NoError(t, err)
+		assert.Equal(t, "https://dev.svc", got)
+	})
+
+	notReady := map[string][]gen.ReleaseBinding{
+		"no binding for the environment": {withEndpoints("prod", &[]gen.EndpointURLStatus{{Name: "a", ServiceURL: &gen.EndpointURL{Host: "prod.svc"}}})},
+		"status has no endpoints yet":    {withEndpoints("dev", nil)},
+		"no endpoint carries a host":     {withEndpoints("dev", &[]gen.EndpointURLStatus{{Name: "a"}})},
+	}
+	for name, items := range notReady {
+		t.Run(name+" is not ready, not an error", func(t *testing.T) {
+			got, err := serve(t, http.StatusOK, items...).GetReleaseBindingServiceURL(context.Background(), "acme", "myagent", "dev")
+			require.NoError(t, err)
+			assert.Empty(t, got)
+		})
+	}
+
+	t.Run("a failed list is an error", func(t *testing.T) {
+		_, err := serve(t, http.StatusInternalServerError).GetReleaseBindingServiceURL(context.Background(), "acme", "myagent", "dev")
+		require.Error(t, err)
+	})
+}

@@ -1827,45 +1827,23 @@ func findDeployedImageFromComponentRelease(release *gen.ComponentRelease) string
 // http when absent — nothing in this repo reads it today, and the in-cluster
 // hop to an agent's container is plain HTTP.
 func (c *openChoreoClient) GetReleaseBindingServiceURL(ctx context.Context, ouID, componentName, environment string) (string, error) {
-	namespaceName := c.NamespaceFor(ouID)
-	resp, err := c.ocClient.ListReleaseBindingsWithResponse(ctx, namespaceName, &gen.ListReleaseBindingsParams{
-		Component: &componentName,
-		Limit:     &defaultListLimit,
-	})
+	binding, err := c.findReleaseBindingForEnv(ctx, c.NamespaceFor(ouID), componentName, environment)
 	if err != nil {
-		return "", fmt.Errorf("failed to list release bindings for %s: %w", componentName, err)
+		return "", fmt.Errorf("failed to find release binding for %s: %w", componentName, err)
 	}
-	if resp.StatusCode() != http.StatusOK {
-		return "", handleErrorResponse(resp.StatusCode(), ErrorResponses{
-			JSON401: resp.JSON401,
-			JSON403: resp.JSON403,
-			JSON404: resp.JSON404,
-			JSON500: resp.JSON500,
-		})
-	}
-	if resp.JSON200 == nil {
+	if binding == nil || binding.Status == nil || binding.Status.Endpoints == nil {
 		return "", nil
 	}
-
-	for _, binding := range resp.JSON200.Items {
-		if binding.Spec == nil || binding.Spec.Environment != environment {
+	for _, ep := range *binding.Status.Endpoints {
+		if ep.ServiceURL == nil || strings.TrimSpace(ep.ServiceURL.Host) == "" {
 			continue
 		}
-		if binding.Status == nil || binding.Status.Endpoints == nil {
-			return "", nil
+		svc := *ep.ServiceURL
+		if svc.Scheme == nil || strings.TrimSpace(*svc.Scheme) == "" {
+			scheme := "http"
+			svc.Scheme = &scheme
 		}
-		for _, ep := range *binding.Status.Endpoints {
-			if ep.ServiceURL == nil || strings.TrimSpace(ep.ServiceURL.Host) == "" {
-				continue
-			}
-			svc := *ep.ServiceURL
-			if svc.Scheme == nil || strings.TrimSpace(*svc.Scheme) == "" {
-				scheme := "http"
-				svc.Scheme = &scheme
-			}
-			return buildEndpointURLString(&svc), nil
-		}
-		return "", nil
+		return buildEndpointURLString(&svc), nil
 	}
 	return "", nil
 }
