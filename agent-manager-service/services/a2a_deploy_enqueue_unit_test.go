@@ -103,3 +103,38 @@ func TestRepublishA2AAgentRejectsUnparseableEnvironmentUUID(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not-a-uuid")
 }
+
+// A new A2A agent's first binding comes from create, not a deploy, so create
+// must queue the first environment's publication itself.
+func TestEnqueueCreatedA2AAgentQueuesTheFirstEnvironment(t *testing.T) {
+	var enqueued []models.A2APublication
+	repo := &repomocks.A2APublicationRepositoryMock{
+		EnqueueFunc: func(ctx context.Context, pub *models.A2APublication) error {
+			enqueued = append(enqueued, *pub)
+			return nil
+		},
+	}
+	svc := &agentManagerService{a2aPublicationRepo: repo, logger: testLogger()}
+	envUUID := uuid.New()
+	artifact := &models.Artifact{UUID: uuid.New()}
+
+	svc.enqueueCreatedA2AAgent(context.Background(), "a2a-agent", "org-1", "checkout", "trip-planner", "dev", envUUID.String(), artifact)
+
+	require.Len(t, enqueued, 1)
+	assert.Equal(t, "dev", enqueued[0].EnvironmentName)
+	assert.Equal(t, envUUID, enqueued[0].EnvironmentUUID)
+	assert.Equal(t, artifact.UUID, enqueued[0].ArtifactUUID)
+}
+
+// Non-A2A agents and agents without an env artifact have nothing to publish; a
+// nil EnqueueFunc panics if any of these paths reaches the queue.
+func TestEnqueueCreatedA2AAgentSkipsAgentsWithNothingToPublish(t *testing.T) {
+	svc := &agentManagerService{a2aPublicationRepo: &repomocks.A2APublicationRepositoryMock{}, logger: testLogger()}
+	envUUID := uuid.New().String()
+
+	assert.NotPanics(t, func() {
+		svc.enqueueCreatedA2AAgent(context.Background(), "chat-api", "org-1", "checkout", "chat", "dev", envUUID, &models.Artifact{UUID: uuid.New()})
+		svc.enqueueCreatedA2AAgent(context.Background(), "a2a-agent", "org-1", "checkout", "trip-planner", "dev", envUUID, nil)
+		svc.enqueueCreatedA2AAgent(context.Background(), "a2a-agent", "org-1", "checkout", "trip-planner", "dev", "not-a-uuid", &models.Artifact{UUID: uuid.New()})
+	})
+}

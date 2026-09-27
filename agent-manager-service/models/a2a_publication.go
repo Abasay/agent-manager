@@ -64,8 +64,10 @@ type A2APublication struct {
 	AttemptCount  int                  `gorm:"column:attempt_count;not null;default:0"`
 	LastError     string               `gorm:"column:last_error;not null;default:''"`
 	NextAttemptAt *time.Time           `gorm:"column:next_attempt_at"`
-	CreatedAt     time.Time            `gorm:"column:created_at;not null;default:NOW()"`
-	UpdatedAt     time.Time            `gorm:"column:updated_at;not null;default:NOW()"`
+	// PublishedUpstreamURL is the upstream the gateway was last given, for drift checks.
+	PublishedUpstreamURL string    `gorm:"column:published_upstream_url;not null;default:''"`
+	CreatedAt            time.Time `gorm:"column:created_at;not null;default:NOW()"`
+	UpdatedAt            time.Time `gorm:"column:updated_at;not null;default:NOW()"`
 }
 
 func (A2APublication) TableName() string { return "a2a_publications" }

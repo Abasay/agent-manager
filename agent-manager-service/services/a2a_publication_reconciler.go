@@ -37,23 +37,23 @@ const (
 	// a2aReconcilerLockID is this loop's own PostgreSQL advisory lock ID,
 	// distinct from schedulerLockID and reconcilerLockID so the three background
 	// loops never block each other.
-	a2aReconcilerLockID  = int64(739281458)
-	a2aReconcilerBatch   = 50
-	a2aReconcilerRetryIn = 30 * time.Second
+	a2aReconcilerLockID = int64(739281458)
+	a2aReconcilerBatch  = 50
+	// a2aReconcilerRetryIn sits just under the tick so a retry is due on the next tick.
+	a2aReconcilerRetryIn = a2aReconcilerTickInterval - 5*time.Second
+	// a2aDriftCheckBatch caps how many published rows one tick re-checks.
+	a2aDriftCheckBatch = 50
 
-	// a2aPublicationAttemptBudget bounds how long an agent may fail to publish
-	// an upstream before the row is called failed.
-	//
-	// The number is the agent startup budget (10 minutes, the point past which
-	// the agent-api startup probe has already given up at least once, so nothing
-	// is still starting) divided by the tick interval, with slack. Past it the
-	// binding is not going to report a ServiceURL, and retrying forever would
-	// only hide that from whoever has to fix it.
+	// a2aPublicationAttemptBudget bounds how many failed attempts, one per tick,
+	// a row gets before it is called failed: 30 ticks of 30s is about 15 minutes.
+	// Waiting for the binding's ServiceURL is not charged, since a first source
+	// build can legitimately take longer; this budget covers real failures such
+	// as a missing ingress gateway or a broadcast that keeps erroring.
 	a2aPublicationAttemptBudget = 30
 )
 
 // errUpstreamNotReady means the binding has not published a ServiceURL yet. It
-// is the expected condition for the first few attempts after a deploy, not a
+// is the expected condition until the first build or deploy binds, not a
 // misconfiguration.
 var errUpstreamNotReady = errors.New("release binding has not published a service URL yet")
 
@@ -77,6 +77,8 @@ type a2aPublicationReconcilerService struct {
 	logger          *slog.Logger
 	stopCh          chan struct{}
 	stopOnce        sync.Once
+	// driftCursor is the last published row id the drift scan checked.
+	driftCursor uuid.UUID
 }
 
 // NewA2APublicationReconcilerService creates an A2APublicationReconcilerService.
@@ -99,6 +101,7 @@ func NewA2APublicationReconcilerService(
 		logger:          logger,
 		stopCh:          make(chan struct{}),
 		stopOnce:        sync.Once{},
+		driftCursor:     uuid.Nil,
 	}
 }
 
@@ -172,16 +175,52 @@ func (s *a2aPublicationReconcilerService) runCycle(ctx context.Context) {
 	for _, pub := range due {
 		s.publishOne(ctx, pub)
 	}
+	s.checkUpstreamDrift(ctx)
+}
+
+// checkUpstreamDrift requeues published rows whose binding now reports a
+// different upstream, e.g. after a rebuild on a new port. It checks one page of
+// rows per tick and resumes after it on the next, wrapping at the end.
+func (s *a2aPublicationReconcilerService) checkUpstreamDrift(ctx context.Context) {
+	rows, err := s.pubRepo.FindPublished(ctx, s.driftCursor, a2aDriftCheckBatch)
+	if err != nil {
+		s.logger.Error("Failed to query published A2A publications for drift", "error", err)
+		return
+	}
+	if len(rows) < a2aDriftCheckBatch {
+		s.driftCursor = uuid.Nil
+	} else {
+		s.driftCursor = rows[len(rows)-1].ID
+	}
+
+	for _, pub := range rows {
+		current, err := s.ocClient.GetReleaseBindingServiceURL(ctx, pub.OUID, pub.AgentName, pub.EnvironmentName)
+		if err != nil || current == "" || current == pub.PublishedUpstreamURL {
+			continue
+		}
+		s.logger.Info("A2A agent upstream drifted from what its gateway was given; republishing",
+			"agentName", pub.AgentName, "environment", pub.EnvironmentName,
+			"publishedUpstream", pub.PublishedUpstreamURL, "currentUpstream", current)
+		err = s.pubRepo.Requeue(ctx, pub)
+		switch {
+		case errors.Is(err, repositories.ErrA2APublicationSuperseded):
+			s.logSuperseded(pub)
+		case err != nil:
+			s.logger.Error("Failed to requeue drifted A2A publication",
+				"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
+		}
+	}
 }
 
 // publishOne emits one agent-environment pair's Agent resource, or schedules a
 // retry when it cannot yet.
 func (s *a2aPublicationReconcilerService) publishOne(ctx context.Context, pub models.A2APublication) {
-	if err := s.attemptPublish(ctx, pub); err != nil {
+	upstreamURL, err := s.attemptPublish(ctx, pub)
+	if err != nil {
 		s.recordAttemptFailure(ctx, pub, err)
 		return
 	}
-	err := s.pubRepo.MarkPublished(ctx, pub)
+	err = s.pubRepo.MarkPublished(ctx, pub, upstreamURL)
 	switch {
 	case errors.Is(err, repositories.ErrA2APublicationSuperseded):
 		s.logSuperseded(pub)
@@ -199,8 +238,13 @@ func (s *a2aPublicationReconcilerService) logSuperseded(pub models.A2APublicatio
 		"agentName", pub.AgentName, "environment", pub.EnvironmentName)
 }
 
-// recordAttemptFailure retries within the budget and gives up past it.
+// recordAttemptFailure waits out a not-ready binding, retries other failures
+// within the budget, and gives up past it.
 func (s *a2aPublicationReconcilerService) recordAttemptFailure(ctx context.Context, pub models.A2APublication, cause error) {
+	if errors.Is(cause, errUpstreamNotReady) {
+		s.recordWaiting(ctx, pub, cause)
+		return
+	}
 	if pub.AttemptCount+1 >= a2aPublicationAttemptBudget {
 		s.logger.Error("A2A agent never reached its gateway within the attempt budget",
 			"agentName", pub.AgentName, "environment", pub.EnvironmentName,
@@ -226,18 +270,32 @@ func (s *a2aPublicationReconcilerService) recordAttemptFailure(ctx context.Conte
 	}
 }
 
-func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pub models.A2APublication) error {
+// recordWaiting reschedules a row whose binding has no ServiceURL yet.
+func (s *a2aPublicationReconcilerService) recordWaiting(ctx context.Context, pub models.A2APublication, cause error) {
+	s.logger.Debug("A2A agent binding not ready yet, will check again",
+		"agentName", pub.AgentName, "environment", pub.EnvironmentName)
+	err := s.pubRepo.MarkWaiting(ctx, pub, cause.Error(), time.Now().Add(a2aReconcilerRetryIn))
+	switch {
+	case errors.Is(err, repositories.ErrA2APublicationSuperseded):
+		s.logSuperseded(pub)
+	case err != nil:
+		s.logger.Error("Failed to schedule A2A publication retry", "error", err)
+	}
+}
+
+// attemptPublish returns the upstream URL it gave the gateway.
+func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pub models.A2APublication) (string, error) {
 	upstreamURL, err := s.ocClient.GetReleaseBindingServiceURL(ctx, pub.OUID, pub.AgentName, pub.EnvironmentName)
 	if err != nil {
-		return fmt.Errorf("failed to read release binding service URL: %w", err)
+		return "", fmt.Errorf("failed to read release binding service URL: %w", err)
 	}
 	if upstreamURL == "" {
-		return errUpstreamNotReady
+		return "", errUpstreamNotReady
 	}
 
 	gateway, err := s.resolveGateway(pub)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// The policy chain is the persisted per-environment config run through the
@@ -245,7 +303,7 @@ func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pu
 	// client must send. The public card route runs its own list.
 	cfg, err := s.agentConfigRepo.Get(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentName)
 	if err != nil {
-		return fmt.Errorf("failed to load agent config: %w", err)
+		return "", fmt.Errorf("failed to load agent config: %w", err)
 	}
 	policies := buildPolicies(withA2AVersionHeader(resolveAPIConfig(cfg, nil, nil, nil, nil, false)))
 
@@ -258,7 +316,7 @@ func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pu
 		CardPolicies: buildCardPolicies(cfg.EffectiveCardCORS()),
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	deploymentID := uuid.New()
@@ -276,7 +334,7 @@ func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pu
 	// serves the Agent YAML back out of it when the gateway fetches after the
 	// event, so an event without a row is an event the gateway cannot act on.
 	if err := s.deploymentRepo.CreateWithLimitEnforcement(deployment, maxDeploymentsPerAPI+deploymentLimitBuffer); err != nil {
-		return fmt.Errorf("failed to create A2A agent deployment row: %w", err)
+		return "", fmt.Errorf("failed to create A2A agent deployment row: %w", err)
 	}
 
 	event := &models.AgentDeploymentEvent{
@@ -285,13 +343,13 @@ func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pu
 		PerformedAt:  time.Now().Truncate(time.Millisecond),
 	}
 	if err := s.events.BroadcastAgentDeploymentEvent(gateway.UUID.String(), event); err != nil {
-		return fmt.Errorf("failed to broadcast agent deployment event: %w", err)
+		return "", fmt.Errorf("failed to broadcast agent deployment event: %w", err)
 	}
 
 	s.logger.Info("Published A2A agent to gateway",
 		"agentName", pub.AgentName, "environment", pub.EnvironmentName,
 		"artifactID", pub.ArtifactUUID, "gateway", gateway.Name, "upstream", upstreamURL)
-	return nil
+	return upstreamURL, nil
 }
 
 // resolveGateway picks the environment's gateway. An A2A agent is inbound
@@ -301,14 +359,15 @@ func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pu
 func (s *a2aPublicationReconcilerService) resolveGateway(pub models.A2APublication) (*models.Gateway, error) {
 	envID := pub.EnvironmentUUID.String()
 	gateways, err := s.gatewayRepo.ListWithFilters(repositories.GatewayFilterOptions{
-		OrganizationID: pub.OUID,
-		EnvironmentID:  &envID,
+		OrganizationID:      pub.OUID,
+		FunctionalityTypeIn: models.IngressGatewayRoles,
+		EnvironmentID:       &envID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list gateways for environment %s: %w", envID, err)
 	}
 	for _, gw := range gateways {
-		if gw != nil && gw.IsIngressCapable() {
+		if gw != nil {
 			return gw, nil
 		}
 	}

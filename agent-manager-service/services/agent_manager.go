@@ -1583,6 +1583,7 @@ func (s *agentManagerService) createComponentAgent(ctx context.Context, ouID, pr
 	}
 
 	var agentAPIArtifact *models.Artifact
+	var firstEnvUUID string
 	if req.AgentType.Type == string(utils.AgentTypeAPI) {
 		firstEnvDetails, envErr := s.ocClient.GetEnvironment(ctx, ouID, firstEnv)
 		if envErr != nil {
@@ -1595,6 +1596,7 @@ func (s *agentManagerService) createComponentAgent(ctx context.Context, ouID, pr
 			}
 			return translateEnvironmentError(envErr)
 		}
+		firstEnvUUID = firstEnvDetails.UUID
 		agentAPIArtifact, err = ensureAgentEnvAPIArtifact(s.db, s.artifactRepo, ouID, projectName, req.Name, firstEnvDetails.UUID)
 		if err != nil {
 			s.logger.Error("Failed to create agent API artifact record", "agentName", req.Name, "environment", firstEnv, "environmentUUID", firstEnvDetails.UUID, "error", err)
@@ -1747,6 +1749,8 @@ func (s *agentManagerService) createComponentAgent(ctx context.Context, ouID, pr
 			instrumentationVersion = req.Configurations.InstrumentationVersion.Get()
 		}
 		s.persistInstrumentationConfig(ctx, ouID, projectName, req.Name, enableAutoInstrumentation, instrumentationVersion)
+		// Queued after the config row exists; the reconciler waits out the first bind.
+		s.enqueueCreatedA2AAgent(ctx, utils.StrPointerAsStr(req.AgentType.SubType, ""), ouID, projectName, req.Name, firstEnv, firstEnvUUID, agentAPIArtifact)
 	}
 
 	// AgentID provisioning: one Thunder identity per org-level environment (not
@@ -6167,6 +6171,25 @@ func (s *agentManagerService) enqueueA2APublication(
 		s.logger.Error("Failed to queue A2A agent gateway publication; the agent is deployed but will not reach its gateway until it is next deployed, promoted, or its deploy settings are saved",
 			"agentName", agentName, "environment", environmentName, "error", err)
 	}
+}
+
+// enqueueCreatedA2AAgent queues a new A2A agent's first-environment publication,
+// since neither the kind bind nor the source build workflow notifies AMS.
+func (s *agentManagerService) enqueueCreatedA2AAgent(
+	ctx context.Context,
+	subType, ouID, projectName, agentName, environmentName, environmentUUID string,
+	artifact *models.Artifact,
+) {
+	if !utils.IsA2AAgentSubType(subType) || artifact == nil {
+		return
+	}
+	envUUID, err := uuid.Parse(environmentUUID)
+	if err != nil {
+		s.logger.Error("Cannot queue A2A agent gateway publication: environment UUID is unparseable",
+			"agentName", agentName, "environment", environmentName, "environmentUUID", environmentUUID, "error", err)
+		return
+	}
+	s.enqueueA2APublication(ctx, ouID, projectName, agentName, environmentName, envUUID, artifact.UUID)
 }
 
 // republishA2AAgent re-queues an A2A agent's gateway resource after the config

@@ -259,7 +259,7 @@ func TestA2AAgentLifecycle(t *testing.T) {
 		retried := duePublication(t)
 		require.NotNil(t, retried)
 		assert.Equal(t, models.A2APublicationStatusPending, retried.Status, "the row is retried, not failed")
-		assert.Equal(t, 1, retried.AttemptCount, "the attempt was counted")
+		assert.Equal(t, 0, retried.AttemptCount, "a not-ready wait is not charged against the budget")
 		require.NotNil(t, retried.NextAttemptAt)
 		assert.True(t, retried.NextAttemptAt.After(time.Now()), "and the next try is scheduled forward")
 	})

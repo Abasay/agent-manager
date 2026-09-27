@@ -118,7 +118,7 @@ func TestA2APublicationMarkPublishedRemovesItFromTheQueue(t *testing.T) {
 	pub := newTestPublication("published-" + uuid.New().String()[:8])
 	cleanupPublication(t, repo, pub)
 	require.NoError(t, repo.Enqueue(ctx, pub))
-	require.NoError(t, repo.MarkPublished(ctx, *pub))
+	require.NoError(t, repo.MarkPublished(ctx, *pub, "http://agent:9099"))
 
 	due, err := repo.FindDue(ctx, time.Now(), 100)
 	require.NoError(t, err)
@@ -163,7 +163,7 @@ func TestA2APublicationMarkPublishedDoesNotSwallowANewerEnqueue(t *testing.T) {
 
 	requeue := *pub
 	require.NoError(t, repo.Enqueue(ctx, &requeue))
-	require.ErrorIs(t, repo.MarkPublished(ctx, read), ErrA2APublicationSuperseded)
+	require.ErrorIs(t, repo.MarkPublished(ctx, read, "http://agent:9099"), ErrA2APublicationSuperseded)
 
 	assert.Equal(t, models.A2APublicationStatusPending, statusOf(t, pub).Status,
 		"the newer enqueue is still owed a publish")
@@ -208,4 +208,95 @@ func TestA2APublicationMarkFailedDoesNotFailANewerEnqueue(t *testing.T) {
 
 	assert.Equal(t, models.A2APublicationStatusPending, statusOf(t, pub).Status,
 		"the newer enqueue is still owed a publish")
+}
+
+// Drift checks compare against what the gateway was last given, and a later
+// redeploy's Enqueue must not erase it.
+func TestA2APublicationMarkPublishedRecordsTheUpstream(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+
+	pub := newTestPublication("upstream-" + uuid.New().String()[:8])
+	cleanupPublication(t, repo, pub)
+	require.NoError(t, repo.Enqueue(ctx, pub))
+	require.NoError(t, repo.MarkPublished(ctx, *pub, "http://agent:9099"))
+	assert.Equal(t, "http://agent:9099", statusOf(t, pub).PublishedUpstreamURL)
+
+	requeue := *pub
+	require.NoError(t, repo.Enqueue(ctx, &requeue))
+	assert.Equal(t, "http://agent:9099", statusOf(t, pub).PublishedUpstreamURL)
+}
+
+// Waiting on a binding is not charged against the attempt budget.
+func TestA2APublicationMarkWaitingDoesNotCountAnAttempt(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+
+	pub := newTestPublication("waiting-" + uuid.New().String()[:8])
+	cleanupPublication(t, repo, pub)
+	require.NoError(t, repo.Enqueue(ctx, pub))
+	require.NoError(t, repo.MarkWaiting(ctx, *pub, "binding not ready", time.Now().Add(time.Hour)))
+
+	row := statusOf(t, pub)
+	assert.Equal(t, 0, row.AttemptCount)
+	assert.Equal(t, models.A2APublicationStatusPending, row.Status)
+	require.NotNil(t, row.NextAttemptAt)
+	assert.True(t, row.NextAttemptAt.After(time.Now()), "the next check is backed off")
+}
+
+// A drifted published row goes back on the queue with a fresh budget.
+func TestA2APublicationRequeueMakesAPublishedRowDue(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+
+	pub := newTestPublication("requeue-" + uuid.New().String()[:8])
+	cleanupPublication(t, repo, pub)
+	require.NoError(t, repo.Enqueue(ctx, pub))
+	require.NoError(t, repo.MarkPublished(ctx, *pub, "http://agent:9099"))
+	published := statusOf(t, pub)
+
+	require.NoError(t, repo.Requeue(ctx, published))
+
+	row := dueRowFor(t, repo, pub.AgentName)
+	assert.Equal(t, models.A2APublicationStatusPending, row.Status)
+	assert.Equal(t, 0, row.AttemptCount)
+	require.ErrorIs(t, repo.Requeue(ctx, published), ErrA2APublicationSuperseded,
+		"a stale read does not requeue twice")
+}
+
+// FindPublished pages in id order and returns only published rows.
+func TestA2APublicationFindPublishedPagesPublishedRows(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+
+	published := newTestPublication("paged-pub-" + uuid.New().String()[:8])
+	pending := newTestPublication("paged-pending-" + uuid.New().String()[:8])
+	cleanupPublication(t, repo, published)
+	cleanupPublication(t, repo, pending)
+	require.NoError(t, repo.Enqueue(ctx, published))
+	require.NoError(t, repo.Enqueue(ctx, pending))
+	require.NoError(t, repo.MarkPublished(ctx, *published, "http://agent:9099"))
+
+	var seen []models.A2APublication
+	cursor := uuid.Nil
+	for {
+		page, err := repo.FindPublished(ctx, cursor, 2)
+		require.NoError(t, err)
+		for i := 1; i < len(page); i++ {
+			assert.Less(t, page[i-1].ID.String(), page[i].ID.String(), "id order")
+		}
+		seen = append(seen, page...)
+		if len(page) < 2 {
+			break
+		}
+		cursor = page[len(page)-1].ID
+	}
+
+	var names []string
+	for _, row := range seen {
+		assert.Equal(t, models.A2APublicationStatusPublished, row.Status)
+		names = append(names, row.AgentName)
+	}
+	assert.Contains(t, names, published.AgentName)
+	assert.NotContains(t, names, pending.AgentName)
 }

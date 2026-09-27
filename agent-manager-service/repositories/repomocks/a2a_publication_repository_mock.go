@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 )
 
@@ -26,14 +27,23 @@ import (
 //			FindDueFunc: func(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error) {
 //				panic("mock out the FindDue method")
 //			},
+//			FindPublishedFunc: func(ctx context.Context, afterID uuid.UUID, limit int) ([]models.A2APublication, error) {
+//				panic("mock out the FindPublished method")
+//			},
 //			MarkAttemptFailedFunc: func(ctx context.Context, read models.A2APublication, lastErr string, nextAttemptAt time.Time) error {
 //				panic("mock out the MarkAttemptFailed method")
 //			},
 //			MarkFailedFunc: func(ctx context.Context, read models.A2APublication, lastErr string) error {
 //				panic("mock out the MarkFailed method")
 //			},
-//			MarkPublishedFunc: func(ctx context.Context, read models.A2APublication) error {
+//			MarkPublishedFunc: func(ctx context.Context, read models.A2APublication, upstreamURL string) error {
 //				panic("mock out the MarkPublished method")
+//			},
+//			MarkWaitingFunc: func(ctx context.Context, read models.A2APublication, reason string, nextAttemptAt time.Time) error {
+//				panic("mock out the MarkWaiting method")
+//			},
+//			RequeueFunc: func(ctx context.Context, read models.A2APublication) error {
+//				panic("mock out the Requeue method")
 //			},
 //		}
 //
@@ -51,6 +61,9 @@ type A2APublicationRepositoryMock struct {
 	// FindDueFunc mocks the FindDue method.
 	FindDueFunc func(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error)
 
+	// FindPublishedFunc mocks the FindPublished method.
+	FindPublishedFunc func(ctx context.Context, afterID uuid.UUID, limit int) ([]models.A2APublication, error)
+
 	// MarkAttemptFailedFunc mocks the MarkAttemptFailed method.
 	MarkAttemptFailedFunc func(ctx context.Context, read models.A2APublication, lastErr string, nextAttemptAt time.Time) error
 
@@ -58,7 +71,13 @@ type A2APublicationRepositoryMock struct {
 	MarkFailedFunc func(ctx context.Context, read models.A2APublication, lastErr string) error
 
 	// MarkPublishedFunc mocks the MarkPublished method.
-	MarkPublishedFunc func(ctx context.Context, read models.A2APublication) error
+	MarkPublishedFunc func(ctx context.Context, read models.A2APublication, upstreamURL string) error
+
+	// MarkWaitingFunc mocks the MarkWaiting method.
+	MarkWaitingFunc func(ctx context.Context, read models.A2APublication, reason string, nextAttemptAt time.Time) error
+
+	// RequeueFunc mocks the Requeue method.
+	RequeueFunc func(ctx context.Context, read models.A2APublication) error
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -89,6 +108,15 @@ type A2APublicationRepositoryMock struct {
 			// Limit is the limit argument value.
 			Limit int
 		}
+		// FindPublished holds details about calls to the FindPublished method.
+		FindPublished []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// AfterID is the afterID argument value.
+			AfterID uuid.UUID
+			// Limit is the limit argument value.
+			Limit int
+		}
 		// MarkAttemptFailed holds details about calls to the MarkAttemptFailed method.
 		MarkAttemptFailed []struct {
 			// Ctx is the ctx argument value.
@@ -115,14 +143,37 @@ type A2APublicationRepositoryMock struct {
 			Ctx context.Context
 			// Read is the read argument value.
 			Read models.A2APublication
+			// UpstreamURL is the upstreamURL argument value.
+			UpstreamURL string
+		}
+		// MarkWaiting holds details about calls to the MarkWaiting method.
+		MarkWaiting []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Read is the read argument value.
+			Read models.A2APublication
+			// Reason is the reason argument value.
+			Reason string
+			// NextAttemptAt is the nextAttemptAt argument value.
+			NextAttemptAt time.Time
+		}
+		// Requeue holds details about calls to the Requeue method.
+		Requeue []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Read is the read argument value.
+			Read models.A2APublication
 		}
 	}
 	lockDeleteForAgent    sync.RWMutex
 	lockEnqueue           sync.RWMutex
 	lockFindDue           sync.RWMutex
+	lockFindPublished     sync.RWMutex
 	lockMarkAttemptFailed sync.RWMutex
 	lockMarkFailed        sync.RWMutex
 	lockMarkPublished     sync.RWMutex
+	lockMarkWaiting       sync.RWMutex
+	lockRequeue           sync.RWMutex
 }
 
 // DeleteForAgent calls DeleteForAgentFunc.
@@ -245,6 +296,46 @@ func (mock *A2APublicationRepositoryMock) FindDueCalls() []struct {
 	return calls
 }
 
+// FindPublished calls FindPublishedFunc.
+func (mock *A2APublicationRepositoryMock) FindPublished(ctx context.Context, afterID uuid.UUID, limit int) ([]models.A2APublication, error) {
+	if mock.FindPublishedFunc == nil {
+		panic("A2APublicationRepositoryMock.FindPublishedFunc: method is nil but A2APublicationRepository.FindPublished was just called")
+	}
+	callInfo := struct {
+		Ctx     context.Context
+		AfterID uuid.UUID
+		Limit   int
+	}{
+		Ctx:     ctx,
+		AfterID: afterID,
+		Limit:   limit,
+	}
+	mock.lockFindPublished.Lock()
+	mock.calls.FindPublished = append(mock.calls.FindPublished, callInfo)
+	mock.lockFindPublished.Unlock()
+	return mock.FindPublishedFunc(ctx, afterID, limit)
+}
+
+// FindPublishedCalls gets all the calls that were made to FindPublished.
+// Check the length with:
+//
+//	len(mockedA2APublicationRepository.FindPublishedCalls())
+func (mock *A2APublicationRepositoryMock) FindPublishedCalls() []struct {
+	Ctx     context.Context
+	AfterID uuid.UUID
+	Limit   int
+} {
+	var calls []struct {
+		Ctx     context.Context
+		AfterID uuid.UUID
+		Limit   int
+	}
+	mock.lockFindPublished.RLock()
+	calls = mock.calls.FindPublished
+	mock.lockFindPublished.RUnlock()
+	return calls
+}
+
 // MarkAttemptFailed calls MarkAttemptFailedFunc.
 func (mock *A2APublicationRepositoryMock) MarkAttemptFailed(ctx context.Context, read models.A2APublication, lastErr string, nextAttemptAt time.Time) error {
 	if mock.MarkAttemptFailedFunc == nil {
@@ -330,9 +421,93 @@ func (mock *A2APublicationRepositoryMock) MarkFailedCalls() []struct {
 }
 
 // MarkPublished calls MarkPublishedFunc.
-func (mock *A2APublicationRepositoryMock) MarkPublished(ctx context.Context, read models.A2APublication) error {
+func (mock *A2APublicationRepositoryMock) MarkPublished(ctx context.Context, read models.A2APublication, upstreamURL string) error {
 	if mock.MarkPublishedFunc == nil {
 		panic("A2APublicationRepositoryMock.MarkPublishedFunc: method is nil but A2APublicationRepository.MarkPublished was just called")
+	}
+	callInfo := struct {
+		Ctx         context.Context
+		Read        models.A2APublication
+		UpstreamURL string
+	}{
+		Ctx:         ctx,
+		Read:        read,
+		UpstreamURL: upstreamURL,
+	}
+	mock.lockMarkPublished.Lock()
+	mock.calls.MarkPublished = append(mock.calls.MarkPublished, callInfo)
+	mock.lockMarkPublished.Unlock()
+	return mock.MarkPublishedFunc(ctx, read, upstreamURL)
+}
+
+// MarkPublishedCalls gets all the calls that were made to MarkPublished.
+// Check the length with:
+//
+//	len(mockedA2APublicationRepository.MarkPublishedCalls())
+func (mock *A2APublicationRepositoryMock) MarkPublishedCalls() []struct {
+	Ctx         context.Context
+	Read        models.A2APublication
+	UpstreamURL string
+} {
+	var calls []struct {
+		Ctx         context.Context
+		Read        models.A2APublication
+		UpstreamURL string
+	}
+	mock.lockMarkPublished.RLock()
+	calls = mock.calls.MarkPublished
+	mock.lockMarkPublished.RUnlock()
+	return calls
+}
+
+// MarkWaiting calls MarkWaitingFunc.
+func (mock *A2APublicationRepositoryMock) MarkWaiting(ctx context.Context, read models.A2APublication, reason string, nextAttemptAt time.Time) error {
+	if mock.MarkWaitingFunc == nil {
+		panic("A2APublicationRepositoryMock.MarkWaitingFunc: method is nil but A2APublicationRepository.MarkWaiting was just called")
+	}
+	callInfo := struct {
+		Ctx           context.Context
+		Read          models.A2APublication
+		Reason        string
+		NextAttemptAt time.Time
+	}{
+		Ctx:           ctx,
+		Read:          read,
+		Reason:        reason,
+		NextAttemptAt: nextAttemptAt,
+	}
+	mock.lockMarkWaiting.Lock()
+	mock.calls.MarkWaiting = append(mock.calls.MarkWaiting, callInfo)
+	mock.lockMarkWaiting.Unlock()
+	return mock.MarkWaitingFunc(ctx, read, reason, nextAttemptAt)
+}
+
+// MarkWaitingCalls gets all the calls that were made to MarkWaiting.
+// Check the length with:
+//
+//	len(mockedA2APublicationRepository.MarkWaitingCalls())
+func (mock *A2APublicationRepositoryMock) MarkWaitingCalls() []struct {
+	Ctx           context.Context
+	Read          models.A2APublication
+	Reason        string
+	NextAttemptAt time.Time
+} {
+	var calls []struct {
+		Ctx           context.Context
+		Read          models.A2APublication
+		Reason        string
+		NextAttemptAt time.Time
+	}
+	mock.lockMarkWaiting.RLock()
+	calls = mock.calls.MarkWaiting
+	mock.lockMarkWaiting.RUnlock()
+	return calls
+}
+
+// Requeue calls RequeueFunc.
+func (mock *A2APublicationRepositoryMock) Requeue(ctx context.Context, read models.A2APublication) error {
+	if mock.RequeueFunc == nil {
+		panic("A2APublicationRepositoryMock.RequeueFunc: method is nil but A2APublicationRepository.Requeue was just called")
 	}
 	callInfo := struct {
 		Ctx  context.Context
@@ -341,17 +516,17 @@ func (mock *A2APublicationRepositoryMock) MarkPublished(ctx context.Context, rea
 		Ctx:  ctx,
 		Read: read,
 	}
-	mock.lockMarkPublished.Lock()
-	mock.calls.MarkPublished = append(mock.calls.MarkPublished, callInfo)
-	mock.lockMarkPublished.Unlock()
-	return mock.MarkPublishedFunc(ctx, read)
+	mock.lockRequeue.Lock()
+	mock.calls.Requeue = append(mock.calls.Requeue, callInfo)
+	mock.lockRequeue.Unlock()
+	return mock.RequeueFunc(ctx, read)
 }
 
-// MarkPublishedCalls gets all the calls that were made to MarkPublished.
+// RequeueCalls gets all the calls that were made to Requeue.
 // Check the length with:
 //
-//	len(mockedA2APublicationRepository.MarkPublishedCalls())
-func (mock *A2APublicationRepositoryMock) MarkPublishedCalls() []struct {
+//	len(mockedA2APublicationRepository.RequeueCalls())
+func (mock *A2APublicationRepositoryMock) RequeueCalls() []struct {
 	Ctx  context.Context
 	Read models.A2APublication
 } {
@@ -359,8 +534,8 @@ func (mock *A2APublicationRepositoryMock) MarkPublishedCalls() []struct {
 		Ctx  context.Context
 		Read models.A2APublication
 	}
-	mock.lockMarkPublished.RLock()
-	calls = mock.calls.MarkPublished
-	mock.lockMarkPublished.RUnlock()
+	mock.lockRequeue.RLock()
+	calls = mock.calls.Requeue
+	mock.lockRequeue.RUnlock()
 	return calls
 }

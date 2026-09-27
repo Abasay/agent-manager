@@ -58,6 +58,7 @@ func pendingPublication() models.A2APublication {
 // it returned.
 type a2aReconcilerHarness struct {
 	svc            *a2aPublicationReconcilerService
+	gatewayRepo    *repomocks.GatewayRepositoryMock
 	hub            *recordingEventHub
 	pubRepo        *repomocks.A2APublicationRepositoryMock
 	deploymentRepo *repomocks.DeploymentRepositoryMock
@@ -70,8 +71,11 @@ type a2aReconcilerHarness struct {
 func newA2AReconcilerHarness(serviceURL string) *a2aReconcilerHarness {
 	hub := &recordingEventHub{}
 	pubRepo := &repomocks.A2APublicationRepositoryMock{
-		MarkPublishedFunc: func(ctx context.Context, read models.A2APublication) error { return nil },
+		MarkPublishedFunc: func(ctx context.Context, read models.A2APublication, upstreamURL string) error { return nil },
 		MarkAttemptFailedFunc: func(ctx context.Context, read models.A2APublication, lastErr string, nextAttemptAt time.Time) error {
+			return nil
+		},
+		MarkWaitingFunc: func(ctx context.Context, read models.A2APublication, lastErr string, nextAttemptAt time.Time) error {
 			return nil
 		},
 		MarkFailedFunc: func(ctx context.Context, read models.A2APublication, lastErr string) error { return nil },
@@ -102,6 +106,7 @@ func newA2AReconcilerHarness(serviceURL string) *a2aReconcilerHarness {
 
 	return &a2aReconcilerHarness{
 		hub:            hub,
+		gatewayRepo:    gatewayRepo,
 		pubRepo:        pubRepo,
 		deploymentRepo: deploymentRepo,
 		ocClient:       ocClient,
@@ -118,9 +123,9 @@ func newA2AReconcilerHarness(serviceURL string) *a2aReconcilerHarness {
 }
 
 // The whole reason this reconciler exists: status is populated only after the
-// binding reconciles, so an early attempt must retry rather than emit an Agent
+// binding reconciles, so an early attempt must wait rather than emit an Agent
 // that routes nowhere.
-func TestReconcilerRetriesWhenServiceURLIsNotReadyYet(t *testing.T) {
+func TestReconcilerWaitsWhenServiceURLIsNotReadyYet(t *testing.T) {
 	h := newA2AReconcilerHarness("")
 
 	h.svc.publishOne(context.Background(), pendingPublication())
@@ -129,16 +134,53 @@ func TestReconcilerRetriesWhenServiceURLIsNotReadyYet(t *testing.T) {
 		"nothing is published until the binding reports an upstream")
 	assert.Empty(t, h.hub.published, "and no gateway is told about it")
 
-	retries := h.pubRepo.MarkAttemptFailedCalls()
-	require.Len(t, retries, 1)
-	assert.True(t, retries[0].NextAttemptAt.After(time.Now()), "the retry is scheduled forward")
-	assert.Empty(t, h.pubRepo.MarkFailedCalls(), "still well inside the budget")
+	waits := h.pubRepo.MarkWaitingCalls()
+	require.Len(t, waits, 1)
+	assert.True(t, waits[0].NextAttemptAt.After(time.Now()), "the retry is scheduled forward")
+	assert.Empty(t, h.pubRepo.MarkAttemptFailedCalls(), "waiting is not charged an attempt")
+	assert.Empty(t, h.pubRepo.MarkFailedCalls())
 }
 
-// Past the startup budget an agent that never became ready is called failed
-// rather than retried forever.
-func TestReconcilerGivesUpPastTheStartupBudget(t *testing.T) {
+// A first source build can take far longer than the attempt budget; waiting on
+// it must never fail the row.
+func TestReconcilerNeverGivesUpWaitingForTheFirstBinding(t *testing.T) {
 	h := newA2AReconcilerHarness("")
+
+	pub := pendingPublication()
+	pub.AttemptCount = a2aPublicationAttemptBudget - 1
+	h.svc.publishOne(context.Background(), pub)
+
+	assert.Len(t, h.pubRepo.MarkWaitingCalls(), 1)
+	assert.Empty(t, h.pubRepo.MarkFailedCalls())
+}
+
+// A retry must be due by the next tick, not land just after it and skip one.
+func TestReconcilerRetryLandsOnTheNextTick(t *testing.T) {
+	h := newA2AReconcilerHarness("http://trip-planner.dp-default:9099")
+	h.svc.gatewayRepo = &repomocks.GatewayRepositoryMock{
+		ListWithFiltersFunc: func(opts repositories.GatewayFilterOptions) ([]*models.Gateway, error) {
+			return []*models.Gateway{}, nil
+		},
+	}
+
+	before := time.Now()
+	h.svc.publishOne(context.Background(), pendingPublication())
+
+	retries := h.pubRepo.MarkAttemptFailedCalls()
+	require.Len(t, retries, 1)
+	assert.True(t, retries[0].NextAttemptAt.Before(before.Add(a2aReconcilerTickInterval)),
+		"due before the next tick fires")
+}
+
+// Past the budget a real failure (here: no ingress gateway) is called failed
+// rather than retried forever.
+func TestReconcilerGivesUpPastTheAttemptBudget(t *testing.T) {
+	h := newA2AReconcilerHarness("http://trip-planner.dp-default:9099")
+	h.svc.gatewayRepo = &repomocks.GatewayRepositoryMock{
+		ListWithFiltersFunc: func(opts repositories.GatewayFilterOptions) ([]*models.Gateway, error) {
+			return []*models.Gateway{}, nil
+		},
+	}
 
 	exhausted := pendingPublication()
 	exhausted.AttemptCount = a2aPublicationAttemptBudget - 1
@@ -147,6 +189,21 @@ func TestReconcilerGivesUpPastTheStartupBudget(t *testing.T) {
 	require.Len(t, h.pubRepo.MarkFailedCalls(), 1)
 	assert.Empty(t, h.pubRepo.MarkAttemptFailedCalls(), "the retry cycle has ended")
 	assert.Empty(t, h.deploymentRepo.CreateWithLimitEnforcementCalls())
+}
+
+// The ingress-role filter belongs in the query, scoped to the org.
+func TestReconcilerQueriesOnlyIngressGatewaysOfTheOrg(t *testing.T) {
+	h := newA2AReconcilerHarness("http://trip-planner.dp-default:9099")
+
+	pub := pendingPublication()
+	h.svc.publishOne(context.Background(), pub)
+
+	calls := h.gatewayRepo.ListWithFiltersCalls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, pub.OUID, calls[0].Filters.OrganizationID)
+	assert.Equal(t, models.IngressGatewayRoles, calls[0].Filters.FunctionalityTypeIn)
+	require.NotNil(t, calls[0].Filters.EnvironmentID)
+	assert.Equal(t, pub.EnvironmentUUID.String(), *calls[0].Filters.EnvironmentID)
 }
 
 // The happy path: a ready binding produces a deployments row carrying the Agent
@@ -186,6 +243,7 @@ func TestReconcilerPublishesOnceServiceURLIsAvailable(t *testing.T) {
 	require.Len(t, marked, 1)
 	assert.Equal(t, pub, marked[0].Read,
 		"the row is marked as it was read, so a re-enqueue meanwhile is not swallowed")
+	assert.Equal(t, upstream, marked[0].UpstreamURL, "the published upstream is recorded for drift checks")
 	assert.Empty(t, h.pubRepo.MarkAttemptFailedCalls())
 }
 
@@ -219,4 +277,84 @@ func TestReconcilerPublishesA2AVersionAndInheritedCardCORS(t *testing.T) {
 	cardCORS := published.Spec.A2A.AgentCard.Public.Policies[0]["params"].(map[string]interface{})
 	assert.Equal(t, []interface{}{"https://client.example"}, cardCORS["allowedOrigins"])
 	assert.Equal(t, []interface{}{"GET", "OPTIONS"}, cardCORS["allowedMethods"])
+}
+
+func publishedPublication(upstreamURL string) models.A2APublication {
+	pub := pendingPublication()
+	pub.Status = models.A2APublicationStatusPublished
+	pub.PublishedUpstreamURL = upstreamURL
+	return pub
+}
+
+func (h *a2aReconcilerHarness) withPublished(rows ...models.A2APublication) {
+	h.pubRepo.FindPublishedFunc = func(ctx context.Context, afterID uuid.UUID, limit int) ([]models.A2APublication, error) {
+		return rows, nil
+	}
+	h.pubRepo.RequeueFunc = func(ctx context.Context, read models.A2APublication) error { return nil }
+}
+
+// A new release with a changed port moves the Service; the gateway must follow.
+func TestDriftCheckRequeuesWhenTheUpstreamMoved(t *testing.T) {
+	h := newA2AReconcilerHarness("http://trip-planner.dp-default:8080")
+	stale := publishedPublication("http://trip-planner.dp-default:9099")
+	h.withPublished(stale)
+
+	h.svc.checkUpstreamDrift(context.Background())
+
+	requeued := h.pubRepo.RequeueCalls()
+	require.Len(t, requeued, 1)
+	assert.Equal(t, stale, requeued[0].Read)
+}
+
+func TestDriftCheckLeavesAMatchingUpstreamAlone(t *testing.T) {
+	const upstream = "http://trip-planner.dp-default:9099"
+	h := newA2AReconcilerHarness(upstream)
+	h.withPublished(publishedPublication(upstream))
+
+	h.svc.checkUpstreamDrift(context.Background())
+
+	assert.Empty(t, h.pubRepo.RequeueCalls())
+}
+
+// An unreadable or empty binding URL is not evidence of drift; requeueing
+// would only park a working agent in the waiting state.
+func TestDriftCheckIgnoresAnUnknownCurrentUpstream(t *testing.T) {
+	h := newA2AReconcilerHarness("")
+	h.withPublished(publishedPublication("http://trip-planner.dp-default:9099"))
+	h.svc.checkUpstreamDrift(context.Background())
+	assert.Empty(t, h.pubRepo.RequeueCalls())
+
+	h.ocClient.GetReleaseBindingServiceURLFunc = func(ctx context.Context, ouID, componentName, environment string) (string, error) {
+		return "", assert.AnError
+	}
+	h.svc.checkUpstreamDrift(context.Background())
+	assert.Empty(t, h.pubRepo.RequeueCalls())
+}
+
+// The scan pages through published rows across ticks and wraps at the end, so
+// every row is checked without any tick doing unbounded work.
+func TestDriftCheckPagesThroughPublishedRowsAcrossTicks(t *testing.T) {
+	h := newA2AReconcilerHarness("http://trip-planner.dp-default:9099")
+	page := make([]models.A2APublication, a2aDriftCheckBatch)
+	for i := range page {
+		page[i] = publishedPublication("http://trip-planner.dp-default:9099")
+	}
+	var cursors []uuid.UUID
+	h.pubRepo.FindPublishedFunc = func(ctx context.Context, afterID uuid.UUID, limit int) ([]models.A2APublication, error) {
+		cursors = append(cursors, afterID)
+		assert.Equal(t, a2aDriftCheckBatch, limit)
+		if afterID == uuid.Nil {
+			return page, nil
+		}
+		return []models.A2APublication{}, nil
+	}
+
+	h.svc.checkUpstreamDrift(context.Background())
+	h.svc.checkUpstreamDrift(context.Background())
+	h.svc.checkUpstreamDrift(context.Background())
+
+	require.Len(t, cursors, 3)
+	assert.Equal(t, uuid.Nil, cursors[0])
+	assert.Equal(t, page[len(page)-1].ID, cursors[1], "the next tick resumes after the last row checked")
+	assert.Equal(t, uuid.Nil, cursors[2], "a short page wraps the scan back to the start")
 }

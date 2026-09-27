@@ -21,6 +21,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -51,10 +52,20 @@ type A2APublicationRepository interface {
 	// longer matches was re-enqueued mid-attempt; it is left pending for the next
 	// tick and ErrA2APublicationSuperseded is returned.
 
-	MarkPublished(ctx context.Context, read models.A2APublication) error
+	// MarkPublished also records the upstream URL the gateway was given.
+	MarkPublished(ctx context.Context, read models.A2APublication, upstreamURL string) error
 
 	// MarkAttemptFailed records a retryable failure and schedules the next try.
 	MarkAttemptFailed(ctx context.Context, read models.A2APublication, lastErr string, nextAttemptAt time.Time) error
+
+	// MarkWaiting schedules the next try without charging the attempt budget.
+	MarkWaiting(ctx context.Context, read models.A2APublication, reason string, nextAttemptAt time.Time) error
+
+	// Requeue resets a published row to pending with a fresh attempt budget.
+	Requeue(ctx context.Context, read models.A2APublication) error
+
+	// FindPublished pages through published rows in id order, starting after afterID.
+	FindPublished(ctx context.Context, afterID uuid.UUID, limit int) ([]models.A2APublication, error)
 
 	// MarkFailed ends the retry cycle. The row is kept as the record of an agent
 	// that never reached its gateway.
@@ -111,12 +122,42 @@ func (r *a2aPublicationRepository) FindDue(ctx context.Context, now time.Time, l
 	return due, nil
 }
 
-func (r *a2aPublicationRepository) MarkPublished(ctx context.Context, read models.A2APublication) error {
+func (r *a2aPublicationRepository) MarkPublished(ctx context.Context, read models.A2APublication, upstreamURL string) error {
 	return r.updateIfUnchanged(ctx, read, map[string]interface{}{
-		"status":          models.A2APublicationStatusPublished,
-		"last_error":      "",
-		"next_attempt_at": nil,
+		"status":                 models.A2APublicationStatusPublished,
+		"last_error":             "",
+		"next_attempt_at":        nil,
+		"published_upstream_url": upstreamURL,
 	})
+}
+
+func (r *a2aPublicationRepository) MarkWaiting(ctx context.Context, read models.A2APublication, reason string, nextAttemptAt time.Time) error {
+	return r.updateIfUnchanged(ctx, read, map[string]interface{}{
+		"last_error":      reason,
+		"next_attempt_at": nextAttemptAt,
+	})
+}
+
+func (r *a2aPublicationRepository) Requeue(ctx context.Context, read models.A2APublication) error {
+	return r.updateIfUnchanged(ctx, read, map[string]interface{}{
+		"status":          models.A2APublicationStatusPending,
+		"attempt_count":   0,
+		"last_error":      "",
+		"next_attempt_at": time.Now(),
+	})
+}
+
+func (r *a2aPublicationRepository) FindPublished(ctx context.Context, afterID uuid.UUID, limit int) ([]models.A2APublication, error) {
+	var rows []models.A2APublication
+	err := r.db.WithContext(ctx).
+		Where("status = ? AND id > ?", models.A2APublicationStatusPublished, afterID).
+		Order("id ASC").
+		Limit(limit).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (r *a2aPublicationRepository) MarkAttemptFailed(ctx context.Context, read models.A2APublication, lastErr string, nextAttemptAt time.Time) error {
