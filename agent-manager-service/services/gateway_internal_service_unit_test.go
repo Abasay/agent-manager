@@ -85,6 +85,8 @@ func TestActiveArtifactDeploymentByGatewayNotDeployed(t *testing.T) {
 			_, err := tt.lookup(newGatewayInternalServiceWithDeployments(repo), context.Background(), "artifact-1", "ou-1", "gw-1")
 			assert.ErrorIs(t, err, tt.notFound)
 			assert.NotErrorIs(t, err, tt.notNotFound)
+			// The gateway controllers rely on this: they map only the kind's own sentinel to 404.
+			assert.NotErrorIs(t, err, utils.ErrDeploymentNotActive)
 		})
 	}
 }

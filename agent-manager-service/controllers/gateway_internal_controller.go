@@ -199,10 +199,6 @@ func (c *gatewayInternalController) GetMCPProxy(w http.ResponseWriter, r *http.R
 
 	proxy, err := c.gatewayInternalService.GetActiveMCPProxyDeploymentByGateway(ctx, proxyID, ouID, gatewayID)
 	if err != nil {
-		if errors.Is(err, utils.ErrDeploymentNotActive) {
-			http.Error(w, "No active deployment found for this MCP proxy on this gateway", http.StatusNotFound)
-			return
-		}
 		if errors.Is(err, utils.ErrMCPProxyNotFound) {
 			http.Error(w, "MCP proxy not found", http.StatusNotFound)
 			return
@@ -255,7 +251,7 @@ func (c *gatewayInternalController) GetAgent(w http.ResponseWriter, r *http.Requ
 
 	agent, err := c.gatewayInternalService.GetActiveAgentDeploymentByGateway(ctx, agentID, ouID, gatewayID)
 	if err != nil {
-		if errors.Is(err, utils.ErrAgentArtifactNotFound) || errors.Is(err, utils.ErrDeploymentNotActive) {
+		if errors.Is(err, utils.ErrAgentArtifactNotFound) {
 			http.Error(w, "No active deployment found for this agent on this gateway", http.StatusNotFound)
 			return
 		}
