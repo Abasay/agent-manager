@@ -309,3 +309,121 @@ func TestEnsureReleaseAndBinding_ClearsStaleRuntimeClassWithEmptyComponentTypeCo
 		assert.False(t, hasRuntimeClass, "adopting the winning binding must still clear the stale runtimeClassName")
 	})
 }
+
+// releaseBindingStub serves one release binding and counts PUTs, capturing the last body.
+func releaseBindingStub(t *testing.T, existing gen.ReleaseBinding) (*openChoreoClient, *int, *gen.ReleaseBinding) {
+	t.Helper()
+	var putCount int
+	var gotBody gen.ReleaseBinding
+	name := existing.Metadata.Name
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/releasebindings"):
+			w.WriteHeader(http.StatusOK)
+			require.NoError(t, json.NewEncoder(w).Encode(gen.ReleaseBindingList{Items: []gen.ReleaseBinding{existing}}))
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/releasebindings/"+name):
+			w.WriteHeader(http.StatusOK)
+			require.NoError(t, json.NewEncoder(w).Encode(existing))
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/releasebindings/"+name):
+			putCount++
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+			w.WriteHeader(http.StatusOK)
+			require.NoError(t, json.NewEncoder(w).Encode(gotBody))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	return c, &putCount, &gotBody
+}
+
+func bindingWithConfigs(traitCfgs, ctCfgs *map[string]interface{}) gen.ReleaseBinding {
+	return gen.ReleaseBinding{
+		Metadata: gen.ObjectMeta{Name: "myagent-dev"},
+		Spec: &gen.ReleaseBindingSpec{
+			Environment:                     "dev",
+			TraitEnvironmentConfigs:         traitCfgs,
+			ComponentTypeEnvironmentConfigs: ctCfgs,
+		},
+	}
+}
+
+type testPolicy struct {
+	Name string `json:"name"`
+	Port int    `json:"port"`
+}
+
+func TestUpdateReleaseBindingTraitConfigs_SkipsWriteWhenConfigsUnchanged(t *testing.T) {
+	envInjKey := "myagent-" + string(TraitEnvInjection)
+	apiKey := "myagent-api-configuration"
+
+	t.Run("identical configs with typed values and a carried-forward secret ref", func(t *testing.T) {
+		existing := bindingWithConfigs(
+			&map[string]interface{}{
+				apiKey:    map[string]interface{}{"policies": []interface{}{map[string]interface{}{"name": "cors", "port": 8080}}},
+				envInjKey: map[string]interface{}{"envInjectionEnabled": true, "agentApiKeySecretRef": "ref", "agentApiKeySecretProperty": "key"},
+			},
+			&map[string]interface{}{"runtimeClassName": "gvisor", "restartedAt": "2020-01-01T00:00:00Z"},
+		)
+		c, puts, _ := releaseBindingStub(t, existing)
+
+		err := c.UpdateReleaseBindingTraitConfigs(context.Background(), "acme", "myagent", "dev",
+			map[string]interface{}{
+				apiKey:    map[string]interface{}{"policies": []testPolicy{{Name: "cors", Port: 8080}}},
+				envInjKey: map[string]interface{}{"envInjectionEnabled": true},
+			},
+			map[string]interface{}{"runtimeClassName": "gvisor"})
+
+		require.NoError(t, err)
+		assert.Equal(t, 0, *puts, "an unchanged deploy-settings save must not write or roll the pod")
+	})
+
+	t.Run("nil existing configs and empty incoming configs", func(t *testing.T) {
+		c, puts, _ := releaseBindingStub(t, bindingWithConfigs(nil, nil))
+
+		err := c.UpdateReleaseBindingTraitConfigs(context.Background(), "acme", "myagent", "dev",
+			map[string]interface{}{}, map[string]interface{}{})
+
+		require.NoError(t, err)
+		assert.Equal(t, 0, *puts, "nil and empty configs are the same configuration")
+	})
+}
+
+func TestUpdateReleaseBindingTraitConfigs_BumpsRestartedAtOnRealChange(t *testing.T) {
+	const staleRestart = "2020-01-01T00:00:00Z"
+	envInjKey := "myagent-" + string(TraitEnvInjection)
+	enabled := map[string]interface{}{envInjKey: map[string]interface{}{"envInjectionEnabled": true}}
+
+	cases := map[string]struct {
+		trait map[string]interface{}
+		ct    map[string]interface{}
+	}{
+		"trait config changed":          {trait: map[string]interface{}{envInjKey: map[string]interface{}{"envInjectionEnabled": false}}, ct: map[string]interface{}{"runtimeClassName": "gvisor"}},
+		"runtime class cleared":         {trait: enabled, ct: map[string]interface{}{}},
+		"component-type config changed": {trait: enabled, ct: map[string]interface{}{"runtimeClassName": "kata"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			existing := bindingWithConfigs(
+				&map[string]interface{}{envInjKey: map[string]interface{}{"envInjectionEnabled": true}},
+				&map[string]interface{}{"runtimeClassName": "gvisor", "restartedAt": staleRestart},
+			)
+			c, puts, got := releaseBindingStub(t, existing)
+
+			err := c.UpdateReleaseBindingTraitConfigs(context.Background(), "acme", "myagent", "dev", tc.trait, tc.ct)
+
+			require.NoError(t, err)
+			require.Equal(t, 1, *puts)
+			require.NotNil(t, got.Spec.ComponentTypeEnvironmentConfigs)
+			restartedAt := (*got.Spec.ComponentTypeEnvironmentConfigs)["restartedAt"]
+			assert.NotEmpty(t, restartedAt)
+			assert.NotEqual(t, staleRestart, restartedAt, "a real config change must roll the pod")
+		})
+	}
+}
+
+func TestEnsureReleaseBindingRuntimeClass_SkipsWriteWhenAlreadyCorrect(t *testing.T) {
+	c, puts, _ := releaseBindingStub(t, bindingWithConfigs(nil, &map[string]interface{}{"runtimeClassName": "gvisor"}))
+
+	require.NoError(t, c.EnsureReleaseBindingRuntimeClass(context.Background(), "acme", "myagent", "dev", "gvisor"))
+	assert.Equal(t, 0, *puts)
+}
