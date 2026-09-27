@@ -43,11 +43,13 @@ type A2APublicationRepository interface {
 	// must get another chance.
 	Enqueue(ctx context.Context, pub *models.A2APublication) error
 
-	// FindDue returns pending rows whose next attempt time has arrived, oldest
-	// first, capped at limit.
-	FindDue(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error)
+	// ClaimDue returns up to limit pending rows whose next attempt time has
+	// arrived, pushing each one's next attempt out by a lease so no other
+	// replica claims it mid-attempt. An attempt that dies without recording an
+	// outcome is retried once the lease runs out.
+	ClaimDue(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error)
 
-	// The Mark* methods record the outcome of an attempt on the row as FindDue
+	// The Mark* methods record the outcome of an attempt on the row as ClaimDue
 	// returned it. Enqueue always moves updated_at, so a row whose updated_at no
 	// longer matches was re-enqueued mid-attempt; it is left pending for the next
 	// tick and ErrA2APublicationSuperseded is returned.
@@ -74,6 +76,9 @@ type A2APublicationRepository interface {
 	// DeleteForAgent removes every environment's row for a deleted agent.
 	DeleteForAgent(ctx context.Context, ouID, projectName, agentName string) error
 }
+
+// a2aPublicationClaimLease comfortably outlasts one publish attempt.
+const a2aPublicationClaimLease = 5 * time.Minute
 
 type a2aPublicationRepository struct {
 	db *gorm.DB
@@ -108,18 +113,26 @@ func (r *a2aPublicationRepository) Enqueue(ctx context.Context, pub *models.A2AP
 	}).Create(pub).Error
 }
 
-func (r *a2aPublicationRepository) FindDue(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error) {
-	var due []models.A2APublication
-	err := r.db.WithContext(ctx).
-		Where("status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
-			models.A2APublicationStatusPending, now).
-		Order("next_attempt_at ASC, created_at ASC").
-		Limit(limit).
-		Find(&due).Error
+func (r *a2aPublicationRepository) ClaimDue(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error) {
+	// The claim leaves updated_at alone, so the Mark* check still only trips on a re-enqueue.
+	var claimed []models.A2APublication
+	err := r.db.WithContext(ctx).Raw(
+		`
+		UPDATE a2a_publications SET next_attempt_at = ?
+		WHERE id IN (
+			SELECT id FROM a2a_publications
+			WHERE status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+			ORDER BY next_attempt_at ASC, created_at ASC
+			LIMIT ?
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING *`,
+		now.Add(a2aPublicationClaimLease), models.A2APublicationStatusPending, now, limit,
+	).Scan(&claimed).Error
 	if err != nil {
 		return nil, err
 	}
-	return due, nil
+	return claimed, nil
 }
 
 func (r *a2aPublicationRepository) MarkPublished(ctx context.Context, read models.A2APublication, upstreamURL string) error {

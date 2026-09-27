@@ -27,18 +27,13 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
-	"github.com/wso2/agent-manager/agent-manager-service/db"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 )
 
 const (
 	a2aReconcilerTickInterval = 30 * time.Second
-	// a2aReconcilerLockID is this loop's own PostgreSQL advisory lock ID,
-	// distinct from schedulerLockID and reconcilerLockID so the three background
-	// loops never block each other.
-	a2aReconcilerLockID = int64(739281458)
-	a2aReconcilerBatch  = 50
+	a2aReconcilerBatch        = 50
 	// a2aReconcilerRetryIn sits just under the tick so a retry is due on the next tick.
 	a2aReconcilerRetryIn = a2aReconcilerTickInterval - 5*time.Second
 	// a2aDriftCheckBatch caps how many published rows one tick re-checks.
@@ -140,35 +135,12 @@ func (s *a2aPublicationReconcilerService) RunOnce(ctx context.Context) {
 	s.runCycle(ctx)
 }
 
-// runCycle claims the due batch under an advisory lock so only one replica
-// scans at a time, then releases it before the slow OpenChoreo and event-hub
-// calls — mirroring agentThunderReconcilerService.runCycle.
+// runCycle publishes the due batch. ClaimDue leases each row, so replicas
+// running concurrently never take the same row.
 func (s *a2aPublicationReconcilerService) runCycle(ctx context.Context) {
-	tx := db.GetDB().WithContext(ctx).Begin()
-	if tx.Error != nil {
-		s.logger.Error("Failed to begin transaction for A2A publication advisory lock", "error", tx.Error)
-		return
-	}
-
-	var locked bool
-	if err := tx.Raw("SELECT pg_try_advisory_xact_lock(?)", a2aReconcilerLockID).Scan(&locked).Error; err != nil {
-		s.logger.Error("Failed to try A2A publication advisory lock", "error", err)
-		tx.Rollback()
-		return
-	}
-	if !locked {
-		tx.Rollback()
-		return
-	}
-
-	due, err := s.pubRepo.FindDue(ctx, time.Now(), a2aReconcilerBatch)
+	due, err := s.pubRepo.ClaimDue(ctx, time.Now(), a2aReconcilerBatch)
 	if err != nil {
-		s.logger.Error("Failed to query due A2A publications", "error", err)
-		tx.Rollback()
-		return
-	}
-	if err := tx.Commit().Error; err != nil {
-		s.logger.Error("Failed to commit A2A publication advisory lock transaction", "error", err)
+		s.logger.Error("Failed to claim due A2A publications", "error", err)
 		return
 	}
 

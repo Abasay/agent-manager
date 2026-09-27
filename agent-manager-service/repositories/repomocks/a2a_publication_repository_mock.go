@@ -18,14 +18,14 @@ import (
 //
 //		// make and configure a mocked repositories.A2APublicationRepository
 //		mockedA2APublicationRepository := &A2APublicationRepositoryMock{
+//			ClaimDueFunc: func(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error) {
+//				panic("mock out the ClaimDue method")
+//			},
 //			DeleteForAgentFunc: func(ctx context.Context, ouID string, projectName string, agentName string) error {
 //				panic("mock out the DeleteForAgent method")
 //			},
 //			EnqueueFunc: func(ctx context.Context, pub *models.A2APublication) error {
 //				panic("mock out the Enqueue method")
-//			},
-//			FindDueFunc: func(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error) {
-//				panic("mock out the FindDue method")
 //			},
 //			FindPublishedFunc: func(ctx context.Context, afterID uuid.UUID, limit int) ([]models.A2APublication, error) {
 //				panic("mock out the FindPublished method")
@@ -52,14 +52,14 @@ import (
 //
 //	}
 type A2APublicationRepositoryMock struct {
+	// ClaimDueFunc mocks the ClaimDue method.
+	ClaimDueFunc func(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error)
+
 	// DeleteForAgentFunc mocks the DeleteForAgent method.
 	DeleteForAgentFunc func(ctx context.Context, ouID string, projectName string, agentName string) error
 
 	// EnqueueFunc mocks the Enqueue method.
 	EnqueueFunc func(ctx context.Context, pub *models.A2APublication) error
-
-	// FindDueFunc mocks the FindDue method.
-	FindDueFunc func(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error)
 
 	// FindPublishedFunc mocks the FindPublished method.
 	FindPublishedFunc func(ctx context.Context, afterID uuid.UUID, limit int) ([]models.A2APublication, error)
@@ -81,6 +81,15 @@ type A2APublicationRepositoryMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// ClaimDue holds details about calls to the ClaimDue method.
+		ClaimDue []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Now is the now argument value.
+			Now time.Time
+			// Limit is the limit argument value.
+			Limit int
+		}
 		// DeleteForAgent holds details about calls to the DeleteForAgent method.
 		DeleteForAgent []struct {
 			// Ctx is the ctx argument value.
@@ -98,15 +107,6 @@ type A2APublicationRepositoryMock struct {
 			Ctx context.Context
 			// Pub is the pub argument value.
 			Pub *models.A2APublication
-		}
-		// FindDue holds details about calls to the FindDue method.
-		FindDue []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// Now is the now argument value.
-			Now time.Time
-			// Limit is the limit argument value.
-			Limit int
 		}
 		// FindPublished holds details about calls to the FindPublished method.
 		FindPublished []struct {
@@ -165,15 +165,55 @@ type A2APublicationRepositoryMock struct {
 			Read models.A2APublication
 		}
 	}
+	lockClaimDue          sync.RWMutex
 	lockDeleteForAgent    sync.RWMutex
 	lockEnqueue           sync.RWMutex
-	lockFindDue           sync.RWMutex
 	lockFindPublished     sync.RWMutex
 	lockMarkAttemptFailed sync.RWMutex
 	lockMarkFailed        sync.RWMutex
 	lockMarkPublished     sync.RWMutex
 	lockMarkWaiting       sync.RWMutex
 	lockRequeue           sync.RWMutex
+}
+
+// ClaimDue calls ClaimDueFunc.
+func (mock *A2APublicationRepositoryMock) ClaimDue(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error) {
+	if mock.ClaimDueFunc == nil {
+		panic("A2APublicationRepositoryMock.ClaimDueFunc: method is nil but A2APublicationRepository.ClaimDue was just called")
+	}
+	callInfo := struct {
+		Ctx   context.Context
+		Now   time.Time
+		Limit int
+	}{
+		Ctx:   ctx,
+		Now:   now,
+		Limit: limit,
+	}
+	mock.lockClaimDue.Lock()
+	mock.calls.ClaimDue = append(mock.calls.ClaimDue, callInfo)
+	mock.lockClaimDue.Unlock()
+	return mock.ClaimDueFunc(ctx, now, limit)
+}
+
+// ClaimDueCalls gets all the calls that were made to ClaimDue.
+// Check the length with:
+//
+//	len(mockedA2APublicationRepository.ClaimDueCalls())
+func (mock *A2APublicationRepositoryMock) ClaimDueCalls() []struct {
+	Ctx   context.Context
+	Now   time.Time
+	Limit int
+} {
+	var calls []struct {
+		Ctx   context.Context
+		Now   time.Time
+		Limit int
+	}
+	mock.lockClaimDue.RLock()
+	calls = mock.calls.ClaimDue
+	mock.lockClaimDue.RUnlock()
+	return calls
 }
 
 // DeleteForAgent calls DeleteForAgentFunc.
@@ -253,46 +293,6 @@ func (mock *A2APublicationRepositoryMock) EnqueueCalls() []struct {
 	mock.lockEnqueue.RLock()
 	calls = mock.calls.Enqueue
 	mock.lockEnqueue.RUnlock()
-	return calls
-}
-
-// FindDue calls FindDueFunc.
-func (mock *A2APublicationRepositoryMock) FindDue(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error) {
-	if mock.FindDueFunc == nil {
-		panic("A2APublicationRepositoryMock.FindDueFunc: method is nil but A2APublicationRepository.FindDue was just called")
-	}
-	callInfo := struct {
-		Ctx   context.Context
-		Now   time.Time
-		Limit int
-	}{
-		Ctx:   ctx,
-		Now:   now,
-		Limit: limit,
-	}
-	mock.lockFindDue.Lock()
-	mock.calls.FindDue = append(mock.calls.FindDue, callInfo)
-	mock.lockFindDue.Unlock()
-	return mock.FindDueFunc(ctx, now, limit)
-}
-
-// FindDueCalls gets all the calls that were made to FindDue.
-// Check the length with:
-//
-//	len(mockedA2APublicationRepository.FindDueCalls())
-func (mock *A2APublicationRepositoryMock) FindDueCalls() []struct {
-	Ctx   context.Context
-	Now   time.Time
-	Limit int
-} {
-	var calls []struct {
-		Ctx   context.Context
-		Now   time.Time
-		Limit int
-	}
-	mock.lockFindDue.RLock()
-	calls = mock.calls.FindDue
-	mock.lockFindDue.RUnlock()
 	return calls
 }
 

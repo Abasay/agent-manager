@@ -65,7 +65,7 @@ func TestA2APublicationEnqueueResetsTheExistingRow(t *testing.T) {
 	requeued.OUID = pub.OUID
 	require.NoError(t, repo.Enqueue(ctx, requeued))
 
-	due, err := repo.FindDue(ctx, time.Now(), 100)
+	due, err := repo.ClaimDue(ctx, time.Now(), 100)
 	require.NoError(t, err)
 
 	var found []models.A2APublication
@@ -83,7 +83,7 @@ func TestA2APublicationEnqueueResetsTheExistingRow(t *testing.T) {
 
 // A row whose retry is scheduled for later must not be handed out until then;
 // otherwise the backoff has no effect and the reconciler spins.
-func TestA2APublicationFindDueRespectsBackoff(t *testing.T) {
+func TestA2APublicationClaimDueRespectsBackoff(t *testing.T) {
 	repo := NewA2APublicationRepository(db.GetDB())
 	ctx := context.Background()
 
@@ -92,13 +92,13 @@ func TestA2APublicationFindDueRespectsBackoff(t *testing.T) {
 	require.NoError(t, repo.Enqueue(ctx, pub))
 	require.NoError(t, repo.MarkAttemptFailed(ctx, *pub, "binding not ready", time.Now().Add(time.Hour)))
 
-	due, err := repo.FindDue(ctx, time.Now(), 100)
+	due, err := repo.ClaimDue(ctx, time.Now(), 100)
 	require.NoError(t, err)
 	for _, row := range due {
 		assert.NotEqual(t, pub.AgentName, row.AgentName, "a backed-off row is not due yet")
 	}
 
-	later, err := repo.FindDue(ctx, time.Now().Add(2*time.Hour), 100)
+	later, err := repo.ClaimDue(ctx, time.Now().Add(2*time.Hour), 100)
 	require.NoError(t, err)
 	var attempts int
 	for _, row := range later {
@@ -120,17 +120,46 @@ func TestA2APublicationMarkPublishedRemovesItFromTheQueue(t *testing.T) {
 	require.NoError(t, repo.Enqueue(ctx, pub))
 	require.NoError(t, repo.MarkPublished(ctx, *pub, "http://agent:9099"))
 
-	due, err := repo.FindDue(ctx, time.Now(), 100)
+	due, err := repo.ClaimDue(ctx, time.Now(), 100)
 	require.NoError(t, err)
 	for _, row := range due {
 		assert.NotEqual(t, pub.AgentName, row.AgentName, "a published row is no longer due")
 	}
 }
 
-// dueRowFor returns the due row for agentName, as the reconciler would have read it.
+// Replicas tick independently, so a row one of them is publishing must not be
+// handed to another until that attempt has had time to finish.
+func TestA2APublicationClaimDueLeasesTheRow(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+
+	pub := newTestPublication("lease-" + uuid.New().String()[:8])
+	cleanupPublication(t, repo, pub)
+	require.NoError(t, repo.Enqueue(ctx, pub))
+	claimed := dueRowFor(t, repo, pub.AgentName)
+
+	again, err := repo.ClaimDue(ctx, time.Now(), 100)
+	require.NoError(t, err)
+	for _, row := range again {
+		assert.NotEqual(t, pub.AgentName, row.AgentName, "a claimed row is not handed out twice")
+	}
+
+	afterLease, err := repo.ClaimDue(ctx, time.Now().Add(a2aPublicationClaimLease+time.Minute), 100)
+	require.NoError(t, err)
+	var reclaimed bool
+	for _, row := range afterLease {
+		reclaimed = reclaimed || row.AgentName == pub.AgentName
+	}
+	assert.True(t, reclaimed, "an attempt that never reported back is retried once the lease runs out")
+
+	require.NoError(t, repo.MarkPublished(ctx, claimed, "http://agent:9099"),
+		"claiming is not mistaken for a re-enqueue")
+}
+
+// dueRowFor claims the due row for agentName, as the reconciler would.
 func dueRowFor(t *testing.T, repo A2APublicationRepository, agentName string) models.A2APublication {
 	t.Helper()
-	due, err := repo.FindDue(context.Background(), time.Now(), 100)
+	due, err := repo.ClaimDue(context.Background(), time.Now(), 100)
 	require.NoError(t, err)
 	for _, row := range due {
 		if row.AgentName == agentName {
