@@ -244,7 +244,7 @@ helm install agent-manager oci://ghcr.io/wso2/wso2-agent-manager \
 | `console.config.featureFlags.enableProfileManagement` | When false, the Profile Settings text fields and Save Changes button are hidden/disabled, and the Change Password tab is disabled. | boolean | `true` |
 | `console.config.featureFlags.enableUserManagement` | When false, the Add User, Invite User, Create Role, and Create Group buttons on the Settings page are disabled. | boolean | `true` |
 | `console.config.gatewayControlPlaneUrl` | Gateway control plane URL rendered into external-gateway setup commands. Routed through the OpenChoreo control-plane gateway (see agentManagerService.ocIngress.gatewayMgmt); host.docker.internal lets a gateway container on the same machine reach it. | string | `"http://host.docker.internal:8080"` |
-| `console.config.gatewayVersion` | Gateway version for setup commands (default: v1.0.0) | string | `"v1.0.0"` |
+| `console.config.gatewayVersion` | Gateway version for setup commands (default: v2026.09.24) | string | `"v2026.09.24"` |
 | `console.config.guardrailCapabilities` | Guardrail capability flags — enable policies that require external system configuration. OOTB policies are always shown regardless of these flags. | object |  |
 | `console.config.guardrailCapabilities.awsBedrock` | Offer AWS Bedrock guardrails. Allowed values: Unlocks: aws-bedrock-guardrail. | boolean | `false` |
 | `console.config.guardrailCapabilities.azureContentSafety` | Offer Azure AI Content Safety guardrails. Allowed values: Unlocks: azure-content-safety-content-moderation. | boolean | `false` |

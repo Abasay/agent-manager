@@ -69,11 +69,11 @@ helm install gateway-operator \
   --namespace ${DATA_PLANE_NS} \
   --set logging.level=debug \
   --set gatewayApi.installStandardCRDs=false \
-  --set gateway.helm.chartVersion=1.2.2 \
+  --set gateway.helm.chartVersion=2026.09.24 \
   --set gateway.values.gateway.controller.image.repository=ghcr.io/wso2/api-platform/gateway-controller \
-  --set gateway.values.gateway.controller.image.tag=1.2.1 \
+  --set gateway.values.gateway.controller.image.tag=2026.09.24 \
   --set gateway.values.gateway.gatewayRuntime.image.repository=ghcr.io/wso2/api-platform/gateway-runtime \
-  --set gateway.values.gateway.gatewayRuntime.image.tag=1.2.1 \
+  --set gateway.values.gateway.gatewayRuntime.image.tag=2026.09.24 \
   --set gateway.values.gateway.controller.encryptionKeys.enabled=true \
   --set gateway.values.gateway.controller.encryptionKeys.secretName=gateway-encryption-keys \
   --timeout 600s
@@ -90,11 +90,11 @@ helm install gateway-operator \
   --namespace ${DATA_PLANE_NS} \
   --set logging.level=info \
   --set gatewayApi.installStandardCRDs=false \
-  --set gateway.helm.chartVersion=1.2.2 \
+  --set gateway.helm.chartVersion=2026.09.24 \
   --set gateway.values.gateway.controller.image.repository=ghcr.io/wso2/api-platform/gateway-controller \
-  --set gateway.values.gateway.controller.image.tag=1.2.1 \
+  --set gateway.values.gateway.controller.image.tag=2026.09.24 \
   --set gateway.values.gateway.gatewayRuntime.image.repository=ghcr.io/wso2/api-platform/gateway-runtime \
-  --set gateway.values.gateway.gatewayRuntime.image.tag=1.2.1 \
+  --set gateway.values.gateway.gatewayRuntime.image.tag=2026.09.24 \
   --set gateway.values.gateway.controller.encryptionKeys.enabled=true \
   --set gateway.values.gateway.controller.encryptionKeys.secretName=gateway-encryption-keys \
   --timeout 600s
@@ -105,7 +105,7 @@ helm install gateway-operator \
 :::note Pin the gateway chart, do not inherit it
 `gateway.helm.chartVersion` decides which gateway chart the operator deploys, and it is the only thing that decides it — the `APIGateway` resource carries no chart version. Inheriting the operator's default has historically produced a chart whose templates do not render the controller's control-plane address, giving a gateway that installs, programs, and serves traffic while never registering with Agent Manager — so it never appears in the gateway list. Pin the chart explicitly, as above.
 
-Pin the container images too. The chart version and the image tags move independently: `1.2.2` is the newest published gateway chart and its defaults point at `1.2.0` images, while `1.2.1` controller and runtime images are published without a matching chart. Setting `chartVersion` alone would therefore leave you on `1.2.0` images, so the four `image.repository`/`image.tag` values above carry the runtime to `1.2.1`. Check the pod images after installing rather than trusting the chart version alone.
+Pin the container images too. The chart version and the image tags move independently, and setting `chartVersion` alone leaves the pods on whatever image tag the chart defaults to, so the four `image.repository`/`image.tag` values above pin the controller and runtime to the same `2026.09.24` build as the chart. Check the pod images after installing rather than trusting the chart version alone.
 
 `gateway.values` is the operator's passthrough into that chart: anything set under it is merged into the values the gateway is deployed with, which is how the encryption keys above are wired.
 :::

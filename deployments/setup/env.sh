@@ -6,12 +6,8 @@ CLUSTER_CONTEXT="k3d-${CLUSTER_NAME}"
 
 # WSO2 API Platform / Gateway Operator versions
 GATEWAY_OPERATOR_VERSION="0.11.0"
-# The chart trails the images: 1.2.1 gateway-controller/gateway-runtime images
-# are published, but no 1.2.1 gateway chart is. Pin the newest chart (1.2.2)
-# and let the image tag override in ensure-gateway-operator.sh carry the
-# runtime to 1.2.1 — the chart's own defaults still point at 1.2.0 images.
-GATEWAY_CHART_VERSION="1.2.2"
-GATEWAY_IMAGE_VERSION="1.2.1"
+GATEWAY_CHART_VERSION="2026.09.24"
+GATEWAY_IMAGE_VERSION="2026.09.24"
 
 
 GATEWAY_ENCRYPTION_SECRET_NAME="gateway-encryption-keys"
