@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -220,30 +221,28 @@ func buildA2AAgentDeploymentYAML(in A2AAgentDeploymentInput) (*A2AAgentDeploymen
 	}, nil
 }
 
-// broadcastA2AAgentDeletion tells every gateway that could be holding this
-// Agent to drop it.
+// collectA2AAgentDeletionTargets returns the gateways that could be holding
+// this artifact as an A2A Agent, or nil when it never was one.
 //
-// The recipient set is the union of the gateways the artifact has deployment
-// rows for and every active gateway in the org — the same union
-// gatewayIDsForDeletion builds for MCP proxies, and for the same reason: a
-// gateway left holding a deleted agent keeps routing to a workload that is
-// gone, so a redundant delete is much cheaper than a missed one.
+// Must run before the artifact row is deleted, since its deployment rows go
+// with it (FK cascade). The recipient set is the union of the gateways the
+// artifact has deployment rows for and every active gateway in the org — the
+// same union gatewayIDsForDeletion builds for MCP proxies, because a gateway
+// left holding a deleted agent keeps routing to a workload that is gone.
 //
-// Best effort. Deletion of the agent itself has already happened by the time
-// this runs; failing it here would leave the caller unable to complete a delete
-// it cannot undo.
-func broadcastA2AAgentDeletion(
-	ctx context.Context,
-	events *GatewayEventsService,
+// Only the A2A publication reconciler writes deployment rows for an agent
+// artifact, so their presence identifies an A2A agent even once the component,
+// and with it the subtype, is already gone.
+func collectA2AAgentDeletionTargets(
 	deploymentRepo repositories.DeploymentRepository,
 	gatewayRepo repositories.GatewayRepository,
 	artifactUUID uuid.UUID,
 	ouID string,
+	isA2AAgent bool,
 	logger *slog.Logger,
-) {
-	_ = ctx
-	if events == nil || artifactUUID == uuid.Nil {
-		return
+) []string {
+	if artifactUUID == uuid.Nil {
+		return nil
 	}
 
 	gatewayIDs := map[string]struct{}{}
@@ -258,6 +257,9 @@ func broadcastA2AAgentDeletion(
 				gatewayIDs[id] = struct{}{}
 			}
 		}
+	}
+	if !isA2AAgent && len(gatewayIDs) == 0 {
+		return nil
 	}
 	if gatewayRepo != nil {
 		active := true
@@ -276,9 +278,32 @@ func broadcastA2AAgentDeletion(
 		}
 	}
 
+	targets := make([]string, 0, len(gatewayIDs))
+	for id := range gatewayIDs {
+		targets = append(targets, id)
+	}
+	sort.Strings(targets)
+	return targets
+}
+
+// sendA2AAgentDeletion tells each gateway to drop the artifact's Agent.
+//
+// Best effort and detached from request cancellation: the agent is already
+// deleted, so a returning handler must not strand a gateway still holding it.
+func sendA2AAgentDeletion(
+	ctx context.Context,
+	events *GatewayEventsService,
+	artifactUUID uuid.UUID,
+	gatewayIDs []string,
+	logger *slog.Logger,
+) {
+	if events == nil || artifactUUID == uuid.Nil {
+		return
+	}
+	ctx = context.WithoutCancel(ctx)
 	event := &models.AgentDeletionEvent{AgentID: artifactUUID.String()}
-	for gatewayID := range gatewayIDs {
-		if err := events.BroadcastAgentDeletionEvent(gatewayID, event); err != nil {
+	for _, gatewayID := range gatewayIDs {
+		if err := events.BroadcastAgentDeletionEvent(ctx, gatewayID, event); err != nil {
 			logger.Warn("Failed to broadcast A2A agent deletion event",
 				"artifactID", artifactUUID, "gatewayID", gatewayID, "error", err)
 		}

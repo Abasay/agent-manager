@@ -34,10 +34,16 @@ import (
 // the EventHub surface is present to satisfy the interface.
 type recordingEventHub struct {
 	published []eventhub.Event
+	contexts  []context.Context
+	onPublish func()
 }
 
-func (h *recordingEventHub) PublishEvent(_ context.Context, gatewayID string, evt eventhub.Event) error {
+func (h *recordingEventHub) PublishEvent(ctx context.Context, gatewayID string, evt eventhub.Event) error {
 	h.published = append(h.published, evt)
+	h.contexts = append(h.contexts, ctx)
+	if h.onPublish != nil {
+		h.onPublish()
+	}
 	return nil
 }
 
@@ -95,11 +101,14 @@ func TestBroadcastAgentDeletionEvent(t *testing.T) {
 	hub := &recordingEventHub{}
 	svc := NewGatewayEventsService(hub)
 
-	err := svc.BroadcastAgentDeletionEvent("gw-1", &models.AgentDeletionEvent{
+	type ctxKey struct{}
+	ctx := context.WithValue(context.Background(), ctxKey{}, "trace-1")
+	err := svc.BroadcastAgentDeletionEvent(ctx, "gw-1", &models.AgentDeletionEvent{
 		AgentID: "0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f",
 	})
 	require.NoError(t, err)
 	require.Len(t, hub.published, 1)
+	assert.Equal(t, "trace-1", hub.contexts[0].Value(ctxKey{}), "the caller's context reaches the hub")
 
 	evt := hub.published[0]
 	assert.Equal(t, eventhub.EventType("agent.deleted"), evt.EventType)

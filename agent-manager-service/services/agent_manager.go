@@ -2644,12 +2644,14 @@ func (s *agentManagerService) DeleteAgent(ctx context.Context, ouID string, proj
 	// Resolve agent type before component deletion so LLM config cleanup does not need
 	// to call GetComponent after the component is gone.
 	isExternalAgent := false
+	isA2AAgent := false
 	agentComp, compErr := s.ocClient.GetComponent(ctx, ouID, projectName, agentName)
 	if compErr != nil {
 		s.logger.Warn("Failed to determine agent type before deletion, assuming internal",
 			"agentName", agentName, "error", compErr)
 	} else {
 		isExternalAgent = agentComp.Provisioning.Type == string(utils.ExternalAgent)
+		isA2AAgent = utils.IsA2AAgentSubType(agentComp.Type.SubType)
 	}
 
 	// Recheck immediately before the actual delete call (the commit point) rather
@@ -2708,7 +2710,7 @@ func (s *agentManagerService) DeleteAgent(ctx context.Context, ouID string, proj
 			if configErr := s.agentConfigRepo.DeleteAllByAgent(ctx, ouID, projectName, agentName); configErr != nil {
 				s.logger.Warn("Failed to delete agent configs from database", "agentName", agentName, "error", configErr)
 			}
-			s.deleteAgentAPIArtifact(ctx, ouID, projectName, agentName)
+			s.deleteAgentAPIArtifact(ctx, ouID, projectName, agentName, isA2AAgent)
 			if s.agentThunderProvisioning != nil {
 				go s.agentThunderProvisioning.DeleteAllBindings(context.WithoutCancel(ctx), ouID, projectName, agentName)
 			}
@@ -2740,7 +2742,7 @@ func (s *agentManagerService) DeleteAgent(ctx context.Context, ouID string, proj
 	}
 
 	// Cleanup env-scoped API artifact record.
-	s.deleteAgentAPIArtifact(ctx, ouID, projectName, agentName)
+	s.deleteAgentAPIArtifact(ctx, ouID, projectName, agentName, isA2AAgent)
 
 	// Cleanup monitors owned by this agent so they are not orphaned after deletion.
 	s.cleanupAgentMonitors(ctx, ouID, projectName, agentName)
@@ -2818,41 +2820,59 @@ func (s *agentManagerService) cleanupAgentMonitors(ctx context.Context, ouID, pr
 	}
 }
 
-func (s *agentManagerService) deleteAgentAPIArtifact(ctx context.Context, ouID, projectName, agentName string) {
-	pipeline, err := s.ocClient.GetProjectDeploymentPipeline(ctx, ouID, projectName)
-	if err != nil {
-		s.logger.Warn("Failed to get deployment pipeline for agent API artifact cleanup", "agentName", agentName, "error", err)
-		return
-	}
-	environmentName := findLowestEnvironment(pipeline.PromotionPaths)
-	if environmentName == "" {
-		return
-	}
-	environment, err := s.ocClient.GetEnvironment(ctx, ouID, environmentName)
-	if err != nil {
-		s.logger.Warn("Failed to get environment for agent API artifact cleanup", "agentName", agentName, "environment", environmentName, "error", err)
-		return
-	}
-	artifact, err := s.artifactRepo.GetByHandle(agentEnvAPIArtifactHandle(projectName, agentName, environment.UUID), ouID)
-	if err != nil {
-		return
-	}
-	// Before the row goes: the gateway keys its Agent on this UUID, and once the
-	// row is gone there is nothing left to name in the event.
-	//
-	// Unconditional rather than gated on the subtype: deleting an agent that was
-	// never an A2A agent sends a delete for an artifact no gateway holds, which
-	// every gateway ignores — and the alternative, reading the subtype off a
-	// component that may already be gone, is the fragile half of the trade.
-	broadcastA2AAgentDeletion(ctx, s.gatewayEventsService, s.deploymentRepo, s.gatewayRepo, artifact.UUID, ouID, s.logger)
+// deleteAgentAPIArtifact removes the agent's per-environment API artifacts and
+// tells gateways holding an A2A Agent for them to drop it.
+//
+// Order matters: queue rows go first so the reconciler cannot re-publish,
+// gateway targets are read before the artifact delete cascades the deployment
+// rows away, and the broadcast goes last so a gateway re-fetching the Agent
+// finds nothing left to serve. isA2AAgent is false when the subtype is unknown;
+// deployment rows then stand in for it.
+func (s *agentManagerService) deleteAgentAPIArtifact(ctx context.Context, ouID, projectName, agentName string, isA2AAgent bool) {
 	if s.a2aPublicationRepo != nil {
 		if pubErr := s.a2aPublicationRepo.DeleteForAgent(ctx, ouID, projectName, agentName); pubErr != nil {
 			s.logger.Warn("Failed to clear A2A publication queue rows for deleted agent",
 				"agentName", agentName, "error", pubErr)
 		}
 	}
-	if delErr := s.artifactRepo.Delete(s.db, artifact.UUID.String()); delErr != nil {
-		s.logger.Warn("Failed to delete agent API artifact record", "agentName", agentName, "environment", environmentName, "environmentUUID", environment.UUID, "error", delErr)
+
+	pipeline, err := s.ocClient.GetProjectDeploymentPipeline(ctx, ouID, projectName)
+	if err != nil {
+		s.logger.Warn("Failed to get deployment pipeline for agent API artifact cleanup", "agentName", agentName, "error", err)
+		return
+	}
+
+	type deletedArtifact struct {
+		uuid       uuid.UUID
+		gatewayIDs []string
+	}
+	var deleted []deletedArtifact
+	for environmentName := range allPipelineEnvironmentNames(pipeline.PromotionPaths) {
+		// The terminal promotion path carries a " " placeholder target.
+		if strings.TrimSpace(environmentName) == "" {
+			continue
+		}
+		environment, envErr := s.ocClient.GetEnvironment(ctx, ouID, environmentName)
+		if envErr != nil {
+			s.logger.Warn("Failed to get environment for agent API artifact cleanup", "agentName", agentName, "environment", environmentName, "error", envErr)
+			continue
+		}
+		artifact, getErr := s.artifactRepo.GetByHandle(agentEnvAPIArtifactHandle(projectName, agentName, environment.UUID), ouID)
+		if getErr != nil {
+			if !errors.Is(getErr, utils.ErrArtifactNotFound) {
+				s.logger.Warn("Failed to look up agent API artifact for cleanup", "agentName", agentName, "environment", environmentName, "error", getErr)
+			}
+			continue
+		}
+		gatewayIDs := collectA2AAgentDeletionTargets(s.deploymentRepo, s.gatewayRepo, artifact.UUID, ouID, isA2AAgent, s.logger)
+		if delErr := s.artifactRepo.Delete(s.db, artifact.UUID.String()); delErr != nil {
+			s.logger.Warn("Failed to delete agent API artifact record", "agentName", agentName, "environment", environmentName, "environmentUUID", environment.UUID, "error", delErr)
+		}
+		deleted = append(deleted, deletedArtifact{uuid: artifact.UUID, gatewayIDs: gatewayIDs})
+	}
+
+	for _, d := range deleted {
+		sendA2AAgentDeletion(ctx, s.gatewayEventsService, d.uuid, d.gatewayIDs, s.logger)
 	}
 }
 

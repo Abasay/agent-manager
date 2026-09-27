@@ -176,8 +176,8 @@ func (s *GatewayEventsService) BroadcastAgentDeploymentEvent(gatewayID string, e
 // timestamp — guards delete does not have — but agent-manager broadcasts no
 // mcpproxy.undeployed today either, and M1 follows that precedent rather than
 // introducing a second teardown path. Worth revisiting.
-func (s *GatewayEventsService) BroadcastAgentDeletionEvent(gatewayID string, event *models.AgentDeletionEvent) error {
-	return s.broadcastEvent(gatewayID, "agent.deleted", "DELETE", event.AgentID, event)
+func (s *GatewayEventsService) BroadcastAgentDeletionEvent(ctx context.Context, gatewayID string, event *models.AgentDeletionEvent) error {
+	return s.broadcastEventContext(ctx, gatewayID, "agent.deleted", "DELETE", event.AgentID, event)
 }
 
 func (s *GatewayEventsService) BroadcastLLMProxyUndeploymentEvent(gatewayID string, event *models.LLMProxyUndeploymentEvent) error {
