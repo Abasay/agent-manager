@@ -19,6 +19,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, Box } from '@wso2/oxygen-ui';
 import { PageLayout, useFormValidation, useDirtyState } from '@agent-management-platform/views';
+import { useUnsavedChangesGuard } from '@agent-management-platform/shared-component';
 import { generatePath, useNavigate, useParams } from 'react-router-dom';
 import { absoluteRouteMap } from '@agent-management-platform/types';
 import { addProjectSchema, type AddProjectFormValues } from './form/schema';
@@ -45,7 +46,8 @@ export const AddNewProject: React.FC = () => {
     setFieldError,
   } = useFormValidation<AddProjectFormValues>(addProjectSchema);
 
-  const { checkDirty, resetDirty } = useDirtyState(formData);
+  const { isDirty, checkDirty, resetDirty } = useDirtyState(formData);
+  const { allowNavigation } = useUnsavedChangesGuard(isDirty);
 
   const params = useMemo(() => ({
     orgName: orgId ?? 'default',
@@ -54,11 +56,11 @@ export const AddNewProject: React.FC = () => {
   const { mutate: createProject, isPending, error } = useCreateProject(params);
 
   const handleCancel = useCallback(() => {
-    navigate(generatePath(
+    allowNavigation(() => navigate(generatePath(
       absoluteRouteMap.children.org.path,
       { orgId: orgId ?? '' }
-    ));
-  }, [navigate, orgId]);
+    )));
+  }, [allowNavigation, navigate, orgId]);
 
   const [lastSubmittedValidationErrors, setLastSubmittedValidationErrors] = useState<
     typeof errors
@@ -81,13 +83,13 @@ export const AddNewProject: React.FC = () => {
       onSuccess: () => {
         resetDirty();
         clearErrors();
-        navigate(generatePath(
+        allowNavigation(() => navigate(generatePath(
           absoluteRouteMap.children.org.children.projects.path,
           {
             orgId: params.orgName ?? '',
             projectId: formData.name,
           }
-        ));
+        )));
       },
       onError: (e: unknown) => {
         // eslint-disable-next-line no-console
@@ -95,7 +97,7 @@ export const AddNewProject: React.FC = () => {
       }
     });
   }, [formData, validateForm, createProject,
-    navigate, params.orgName, resetDirty, clearErrors, errors]);
+    navigate, allowNavigation, params.orgName, resetDirty, clearErrors, errors]);
 
   return (
     <PageLayout

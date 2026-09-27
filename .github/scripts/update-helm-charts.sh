@@ -19,22 +19,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCS_VERSION="$(bash "$SCRIPT_DIR/resolve-docs-version.sh" "$TARGET_VERSION")"
 
 # A release must not ship a console pinned to documentation that was never
-# published, so fail early rather than emitting links that 404. The manifest is
-# tracked and this script runs from the repository root, so its absence means
-# something is wrong with the checkout and must not silently skip the check.
-# Candidates and nightlies never reach here, since DOCS_VERSION is empty.
-VERSIONS_FILE="./documentation/versions.json"
-if [ -n "$DOCS_VERSION" ]; then
-  if [ ! -f "$VERSIONS_FILE" ]; then
-    echo "Error: documentation manifest $VERSIONS_FILE is missing, so $DOCS_VERSION cannot be verified."
-    exit 1
-  fi
-  if ! grep -q "\"$DOCS_VERSION\"" "$VERSIONS_FILE"; then
-    echo "Error: documentation version $DOCS_VERSION is not present in $VERSIONS_FILE."
-    echo "Run the Documentation Release workflow for $DOCS_VERSION before releasing $TARGET_VERSION."
-    exit 1
-  fi
-fi
+# published, so fail early rather than emitting links that 404. The check reads
+# the manifest published by wso2/docs-agent-platform; candidates and nightlies
+# pass straight through, since DOCS_VERSION is empty for them.
+bash "$SCRIPT_DIR/assert-docs-version-published.sh" "$DOCS_VERSION" "$TARGET_VERSION"
 
 if [ -n "$DOCS_VERSION" ]; then
   echo "Documentation version for this release: $DOCS_VERSION"

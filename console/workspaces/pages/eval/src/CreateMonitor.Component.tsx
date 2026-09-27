@@ -132,7 +132,10 @@ export const CreateMonitorComponent: React.FC = () => {
   }, [agentId, orgId, projectId, envId]);
 
   const handleCreateMonitor = useCallback(
-    (values: CreateMonitorFormValues) => {
+    (
+      values: CreateMonitorFormValues,
+      allowNavigation: (action: () => void) => void,
+    ) => {
       if (!orgId || !projectId || !agentId || !envId) {
         return;
       }
@@ -157,7 +160,7 @@ export const CreateMonitorComponent: React.FC = () => {
         onSuccess: () => {
           // Land on the monitor list for whichever environment it was actually
           // created in, which may differ from the page's originating envId.
-          navigate(
+          allowNavigation(() => navigate(
             generatePath(
               absoluteRouteMap.children.org.children.projects.children.agents
                 .children.environment.children.evaluation.children.monitor
@@ -169,7 +172,7 @@ export const CreateMonitorComponent: React.FC = () => {
                 envId: values.environmentName,
               },
             ),
-          );
+          ));
         },
       });
     },

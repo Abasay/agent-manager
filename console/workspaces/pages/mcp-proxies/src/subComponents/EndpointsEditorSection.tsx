@@ -47,6 +47,8 @@ export interface EndpointsEditorSectionProps {
   // Fires once, right after a brand-new endpoint is added (not on edits) — used by
   // the create-proxy form to seed the proxy name/version from the fetched server.
   onEndpointAdded?: (draft: Omit<EndpointDraft, "id">) => void;
+  // Whether the open add/edit form holds edits not yet applied to `endpoints`.
+  onEndpointFormDirtyChange?: (dirty: boolean) => void;
 }
 
 // Shared by AddMCPProxyForm and EditMCPProxyDrawer: renders the endpoint list with
@@ -65,6 +67,7 @@ export function EndpointsEditorSection({
   onEditingIdChange,
   emptyStateText,
   onEndpointAdded,
+  onEndpointFormDirtyChange,
 }: EndpointsEditorSectionProps) {
   const environmentLabels = useMemo(() => {
     const labels = new Map<string, string>();
@@ -153,6 +156,7 @@ export function EndpointsEditorSection({
                   initialDraft={editingEndpoint}
                   onAdd={handleSaveEditedEndpoint}
                   onCancel={closeEndpointForm}
+                  onDirtyChange={onEndpointFormDirtyChange}
                 />
               </Box>
             ) : (
@@ -187,6 +191,7 @@ export function EndpointsEditorSection({
                 availableEnvironments={availableEnvironments}
                 onAdd={handleAddEndpoint}
                 onCancel={closeEndpointForm}
+                onDirtyChange={onEndpointFormDirtyChange}
               />
             </Box>
           )}

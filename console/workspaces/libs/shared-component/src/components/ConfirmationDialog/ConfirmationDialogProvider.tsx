@@ -22,6 +22,7 @@ export interface ConfirmationEvent {
     | "info"
     | "success";
   confirmButtonText?: string;
+  cancelButtonText?: string;
 }
 
 export interface ConfirmationContextType {
@@ -83,7 +84,9 @@ export function ConfirmationDialogProvider({
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCancel}>Cancel</Button>
+          <Button onClick={handleCancel}>
+            {currentConfirmation?.cancelButtonText || "Cancel"}
+          </Button>
           <Button
             onClick={handleConfirm}
             variant="contained"

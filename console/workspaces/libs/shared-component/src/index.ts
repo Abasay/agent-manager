@@ -31,3 +31,4 @@ export * from './utils/githubUrl';
 export * from './utils/mcpEndpointSecurity';
 export * from './utils/mcpEnvVarSpec';
 export * from './utils/useMCPProxySecurity';
+export * from './utils/useUnsavedChangesGuard';

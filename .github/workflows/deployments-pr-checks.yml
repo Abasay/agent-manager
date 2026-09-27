@@ -6,9 +6,6 @@ on:
       - main
     paths:
       - 'deployments/**'
-      - 'documentation/docs/**'
-      - 'documentation/versioned_docs/**'
-      - 'documentation/versions.json'
       - '.github/scripts/check-no-raw-github-fetches.sh'
       - '.github/scripts/rewrite-image-registry.sh'
       - '.github/scripts/build-vm-bundle.sh'

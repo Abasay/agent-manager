@@ -51,7 +51,7 @@ import {
   type AgentIdentityAgentResponse,
   type ThunderRole,
 } from "@agent-management-platform/types";
-import { EditFormSkeleton } from "@agent-management-platform/shared-component";
+import { EditFormSkeleton, useUnsavedChangesGuard } from "@agent-management-platform/shared-component";
 import { PageLayout } from "@agent-management-platform/views";
 import { AgentNameWithProject } from "./AgentNameWithProject";
 import { useAgentLookup } from "./useAgentLookup";
@@ -265,6 +265,9 @@ export const GroupEditPage: React.FC = () => {
 
   const isLoading = isLoadingGroup || isLoadingMembers || isLoadingAgents;
 
+  const isDirty = memberDelta.isDirty || roleDelta.isDirty;
+  const { allowNavigation } = useUnsavedChangesGuard(isDirty);
+
   if (isLoading) {
     return (
       <PageLayout title="Group" backHref={groupsPath} backLabel="Back to Groups" disableIcon>
@@ -272,8 +275,6 @@ export const GroupEditPage: React.FC = () => {
       </PageLayout>
     );
   }
-
-  const isDirty = memberDelta.isDirty || roleDelta.isDirty;
 
   return (
     <PageLayout
@@ -481,7 +482,7 @@ export const GroupEditPage: React.FC = () => {
           <Stack direction="row" spacing={1}>
             <Button
               variant="outlined"
-              onClick={() => navigate(groupsPath)}
+              onClick={() => allowNavigation(() => navigate(groupsPath))}
               disabled={isSaving}
             >
               Cancel

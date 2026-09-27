@@ -25,6 +25,7 @@ import {
   type Environment,
   type GatewayResponse,
   type MCPServerInfoFetchResponse,
+  INPUT_LIMITS,
 } from "@agent-management-platform/types";
 import {
   Accordion,
@@ -101,6 +102,8 @@ export interface EndpointFormFieldsProps {
   // When provided, the form edits an existing endpoint: fields are pre-filled and
   // its stored (unreadable) credential is masked until the user replaces it.
   initialDraft?: EndpointDraft;
+  // Reports whether the form holds edits not yet applied with Add/Update.
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 export function EndpointFormFields({
@@ -109,6 +112,7 @@ export function EndpointFormFields({
   onAdd,
   onCancel,
   initialDraft,
+  onDirtyChange,
 }: EndpointFormFieldsProps) {
   const fetchServerInfo = useFetchMCPProxyServerInfo();
   const { pushSnackBar } = useSnackBar();
@@ -133,6 +137,11 @@ export function EndpointFormFields({
   // EnvironmentGatewaySelectorView. Environment assignment and the per-environment
   // gateway map (below) are both derived from this.
   const [gatewayIds, setGatewayIds] = useState<string[]>([]);
+  // Gateway selection the form started from: empty for a new endpoint, and set
+  // once the seed effect below resolves an edited endpoint's gateways.
+  const [initialGatewayIds, setInitialGatewayIds] = useState<string[] | null>(
+    initialDraft ? null : [],
+  );
   // Gateway ids the endpoint is already deployed to — read once from initialDraft
   // (GET only echoes gatewayId for a binding that's actually deployed), so this
   // never changes for the life of the form and locks those rows.
@@ -218,7 +227,24 @@ export function EndpointFormFields({
     if (seededRef.current || !initialDraft || !gatewaysData) return;
     seededRef.current = true;
     setGatewayIds(Object.values(normalizedInitialGatewayByEnv));
+    setInitialGatewayIds(Object.values(normalizedInitialGatewayByEnv));
   }, [gatewaysData, initialDraft, normalizedInitialGatewayByEnv]);
+
+  const isDirty =
+    name !== (initialDraft?.name ?? "") ||
+    url !== (initialDraft?.url ?? "") ||
+    authHeader !== (initialDraft?.authHeader ?? "") ||
+    authValue !== (hasStoredCredential ? MASKED_CREDENTIAL_VALUE : "") ||
+    !authEnabled ||
+    resilienceTimeout !== (initialDraft?.resilienceTimeout ?? "") ||
+    resilienceIdleTimeout !== (initialDraft?.resilienceIdleTimeout ?? "") ||
+    (initialGatewayIds !== null &&
+      [...gatewayIds].sort().join() !== [...initialGatewayIds].sort().join());
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
+  // Unmounting (Add/Update/Cancel) ends the in-progress edit.
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   const selectedEnvIds = useMemo(
     () =>
@@ -456,6 +482,7 @@ export function EndpointFormFields({
       <FormControl fullWidth>
         <FormLabel>Endpoint Name</FormLabel>
         <TextField
+          slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.NAME } }}
           fullWidth
           value={name}
           onChange={(event) => setName(event.target.value)}
@@ -467,6 +494,7 @@ export function EndpointFormFields({
       <FormControl fullWidth error={Boolean(urlError)}>
         <FormLabel required>MCP Server Endpoint URL</FormLabel>
         <TextField
+          slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.URL } }}
           fullWidth
           value={url}
           onChange={(event) => {

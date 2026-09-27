@@ -35,11 +35,13 @@ import {
 } from "@agent-management-platform/views";
 import { z } from "zod";
 import { useUpdateAgentResourceConfigs } from "@agent-management-platform/api-client";
-import type {
-  AgentResourceConfigsResponse,
-  UpdateAgentResourceConfigsRequest,
+import {
+  type AgentResourceConfigsResponse,
+  type UpdateAgentResourceConfigsRequest,
+  INPUT_LIMITS,
 } from "@agent-management-platform/types";
-import { useCallback, useEffect, useState } from "react";
+import { useUnsavedChangesGuard } from "@agent-management-platform/shared-component";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 const cpuPattern = /^[0-9]+(\.[0-9]+)?m?$/i;
 const memoryPattern = /^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|Pi|Ei)$/i;
@@ -231,6 +233,7 @@ export function EditResourceConfigsDrawer({
   environment,
 }: EditResourceConfigsDrawerProps) {
   const [formData, setFormData] = useState<ResourceConfigsFormValues>(DEFAULT_FORM_VALUES);
+  const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
 
   const {
     errors,
@@ -245,12 +248,20 @@ export function EditResourceConfigsDrawer({
 
   useEffect(() => {
     if (open) {
-      setFormData(
-        resourceConfigs ? toFormValues(resourceConfigs) : DEFAULT_FORM_VALUES
-      );
+      const seed = resourceConfigs ? toFormValues(resourceConfigs) : DEFAULT_FORM_VALUES;
+      setFormData(seed);
+      setInitialSnapshot(JSON.stringify(seed));
       clearErrors();
     }
   }, [open, resourceConfigs, clearErrors]);
+
+  const isDirty = useMemo(
+    () => open && initialSnapshot !== null && JSON.stringify(formData) !== initialSnapshot,
+    [open, initialSnapshot, formData],
+  );
+  // onClose drops a URL param, so the guard would otherwise block the
+  // deliberate Cancel and post-save closes too.
+  const { allowNavigation } = useUnsavedChangesGuard(isDirty);
 
   const handleFieldChange = useCallback(
     (field: keyof ResourceConfigsFormValues, value: unknown) => {
@@ -283,7 +294,7 @@ export function EditResourceConfigsDrawer({
         {
           onSuccess: () => {
             clearErrors();
-            onClose();
+            allowNavigation(onClose);
           },
           onError: (error) => {
             const body = (error as { body?: { message?: string } })?.body;
@@ -400,6 +411,7 @@ export function EditResourceConfigsDrawer({
               <Form.Stack spacing={2}>
                 <Form.ElementWrapper label="CPU request" name="cpuRequest">
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.KEY } }}
                     id="cpuRequest"
                     placeholder="e.g., 500m, 0.5, 1"
                     size="small"
@@ -413,6 +425,7 @@ export function EditResourceConfigsDrawer({
                 </Form.ElementWrapper>
                 <Form.ElementWrapper label="Memory request" name="memoryRequest">
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.KEY } }}
                     id="memoryRequest"
                     placeholder="e.g., 512Mi, 1Gi"
                     size="small"
@@ -432,6 +445,7 @@ export function EditResourceConfigsDrawer({
               <Form.Stack spacing={2}>
                 <Form.ElementWrapper label="CPU limit" name="cpuLimit">
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.KEY } }}
                     id="cpuLimit"
                     placeholder="e.g., 1, 2"
                     size="small"
@@ -445,6 +459,7 @@ export function EditResourceConfigsDrawer({
                 </Form.ElementWrapper>
                 <Form.ElementWrapper label="Memory limit" name="memoryLimit">
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.KEY } }}
                     id="memoryLimit"
                     placeholder="e.g., 1Gi, 2Gi"
                     size="small"
@@ -462,7 +477,7 @@ export function EditResourceConfigsDrawer({
             <Box display="flex" justifyContent="flex-end" gap={1} mt={2}>
               <Button
                 variant="outlined"
-                onClick={onClose}
+                onClick={() => allowNavigation(onClose)}
                 disabled={isPending}
               >
                 Cancel

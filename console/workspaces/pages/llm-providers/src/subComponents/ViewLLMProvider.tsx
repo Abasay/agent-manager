@@ -17,7 +17,10 @@
  */
 
 import React, { useCallback, useMemo, useState } from "react";
-import { getErrorMessage } from "@agent-management-platform/shared-component";
+import {
+  getErrorMessage,
+  useConfirmIfUnsaved,
+} from "@agent-management-platform/shared-component";
 import {
   useGetLLMProvider,
   useListLLMProviderTemplates,
@@ -83,7 +86,16 @@ function TabPanel({ value, index, children }: TabPanelProps) {
 }
 
 export const ViewLLMProvider: React.FC = () => {
-  const [tabIndex, setTabIndex] = useState(0);
+  const [tabIndex, setTabIndexState] = useState(0);
+  const confirmIfUnsaved = useConfirmIfUnsaved();
+  // Inactive panels unmount, so switching tabs would drop unsaved edits.
+  const setTabIndex = useCallback(
+    (index: number) => {
+      if (index === tabIndex) return;
+      confirmIfUnsaved(() => setTabIndexState(index));
+    },
+    [confirmIfUnsaved, tabIndex],
+  );
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
 
   const { providerId, orgId } = useParams<{
@@ -150,10 +162,11 @@ export const ViewLLMProvider: React.FC = () => {
       backLabel="Back to LLM Providers"
       isLoading={isLoading}
       // The template's own logo identifies the provider better than a letter
-      // tile; `transparent` keeps the logo on the card surface.
+      // tile; use a white background so dark logos (e.g. OpenAI's black mark)
+      // remain visible in both light and dark themes.
       avatar={
         templateLogoUrl
-          ? { src: templateLogoUrl, alt: templateDisplayName, color: "transparent" }
+          ? { src: templateLogoUrl, alt: templateDisplayName, color: "common.white" }
           : undefined
       }
       actions={
@@ -182,6 +195,11 @@ export const ViewLLMProvider: React.FC = () => {
                     sx={{
                       width: 14,
                       height: 14,
+                      objectFit: "contain",
+                      bgcolor: "common.white",
+                      borderRadius: "2px",
+                      p: "1px",
+                      flexShrink: 0,
                     }}
                   />
                 ) : undefined

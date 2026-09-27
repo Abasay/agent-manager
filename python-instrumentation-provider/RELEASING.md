@@ -35,7 +35,7 @@ stay on the version they were pinned to — bumping the default never moves them
 | **Server's embedded catalog** (the set of AMP-instr versions a given build of `agent-manager-service` knows about) | `agent-manager-service/instrumentation/baseline.json` — generated from `release-config.json` by `make gen-instrumentation-baseline`; embedded into the binary via `//go:embed`. The catalog rejects a platform default that isn't in this set, so this file must be regenerated whenever `release-config.json` changes |
 | **Platform default AMP-instr version** | Two places, and **both** must move together: `deployments/helm-charts/wso2-agent-manager/values.yaml` → `agentManagerService.config.otel.defaultInstrumentationVersion` (rendered into `OTEL_DEFAULT_INSTRUMENTATION_VERSION` at install time; operators can override per install), and the in-code fallback in `agent-manager-service/config/config_loader.go` used when that env var is unset (docker-compose dev, `make dev-up`, a directly-run binary). No test catches the code fallback drifting — `TestHelmDefaultInstrumentationVersionConsistent` only compares `values.yaml` against `baseline.json` |
 | **Traceloop versions the test matrix knows about** | `test/instrumentation-matrix/matrix.yaml` → `providers.traceloop.versions` + `instrumentationVersions`. `scripts/check-matrix-manifest.py` (CI job **verify-contract-and-manifest**) requires every `release-config.json` entry to be covered here, so this is a **hard dependency of the same PR**, not just pre-validation |
-| **Customer-facing version → `traceloop-sdk` → supported-Python mapping table** | `documentation/docs/guides/amp-instrumentation.mdx` |
+| **Customer-facing version → `traceloop-sdk` → supported-Python mapping table** | `docs/guides/amp-instrumentation.mdx` in [wso2/docs-agent-platform](https://github.com/wso2/docs-agent-platform) — a separate repository, so this is a separate pull request |
 | Console version dropdowns (Python + instrumentation) | Server-driven at runtime via `GET /api/v1/orgs/{orgName}/agent-build-options`; no hardcoded Console list. Adding a version to `baseline.json` makes it appear in the dropdown automatically after the next build. |
 
 > The init-container image's Python version **must match the agent's runtime Python** —
@@ -211,13 +211,15 @@ Example: `traceloop-sdk` `0.61.0` → `0.65.0`, cutting AMP-instr version `0.4.0
    The next AMP product release ships this default. Operators can still override it
    per install via the same chart value. Existing agents are unaffected — the default
    only applies to *new* agents created without an explicit pin.
-9. **Docs / mapping table**: add a `0.4.0 → traceloop-sdk 0.65.0 → python 3.10–3.13` row
-   to the "Bundled baseline" table in `documentation/docs/guides/amp-instrumentation.mdx`
-   and move the `(default)` marker onto it. Also update the stated default in
-   `documentation/docs/guides/instrumentation-catalog.mdx` ("The platform default"
-   section). Leave `documentation/versioned_docs/**` alone — those are frozen snapshots.
-   (Console dropdowns are populated from the runtime catalog at the agent-build-options
-   endpoint, so no Console-side edit is needed.)
+9. **Docs / mapping table**: these files live in
+   [wso2/docs-agent-platform](https://github.com/wso2/docs-agent-platform), so this
+   is a second pull request against that repository. Add a
+   `0.4.0 → traceloop-sdk 0.65.0 → python 3.10–3.13` row to the "Bundled baseline"
+   table in `docs/guides/amp-instrumentation.mdx` and move the `(default)` marker
+   onto it. Also update the stated default in `docs/guides/instrumentation-catalog.mdx`
+   ("The platform default" section). Leave `versioned_docs/**` alone — those are
+   frozen snapshots. (Console dropdowns are populated from the runtime catalog at
+   the agent-build-options endpoint, so no Console-side edit is needed.)
 
 ## Scenario B — add (or drop) a supported Python version
 

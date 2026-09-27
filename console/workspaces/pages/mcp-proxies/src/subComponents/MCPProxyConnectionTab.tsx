@@ -16,9 +16,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type {
-  MCPEndpointConfig,
-  MCPProxy,
+import {
+  type MCPEndpointConfig,
+  type MCPProxy,
+  INPUT_LIMITS,
 } from "@agent-management-platform/types";
 import {
   Accordion,
@@ -40,6 +41,7 @@ import {
 import { ChevronDown, HelpCircle } from "@wso2/oxygen-ui-icons-react";
 import {
   ResilienceTimeoutFields,
+  useUnsavedChangesGuard,
   validateEndpointUrl,
 } from "@agent-management-platform/shared-component";
 import { AuthHeaderRow } from "./AuthHeaderRow";
@@ -171,6 +173,7 @@ export function MCPProxyConnectionTab({
     credentialChanged,
   ]);
 
+  useUnsavedChangesGuard(isDirty);
   const handleDiscard = useCallback(() => {
     resetFromConfig();
     setStatus(null);
@@ -280,6 +283,7 @@ export function MCPProxyConnectionTab({
           <FormControl fullWidth>
             <FormLabel required>MCP Server Endpoint URL</FormLabel>
             <TextField
+              slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.URL } }}
               size="small"
               value={endpoint}
               onChange={(e) => {

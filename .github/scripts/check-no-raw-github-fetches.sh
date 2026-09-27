@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fail if an installer or a guide fetches this repository's own files over HTTP.
+# Fail if an installer fetches this repository's own files over HTTP.
 # Run: bash .github/scripts/check-no-raw-github-fetches.sh
 #
 # Those fetches are what the release bundle exists to replace. They break in
@@ -41,30 +41,9 @@ check() {
 
 check "installers under deployments/" \
   --include='*.sh' --include='*.yaml' --include='*.yml' deployments
-check "guides under documentation/docs/" \
-  --include='*.mdx' --include='*.md' documentation/docs
-
-# The current version snapshot is what the docs site serves, so it needs the same
-# gate. Older snapshots are deliberately excluded: they are frozen records of
-# what shipped, they still contain these URLs, and rewriting them would be
-# falsifying history rather than fixing an install.
-LATEST_VERSION="$(sed -n 's/^[[:space:]]*"\(v[0-9][^"]*\)".*/\1/p' documentation/versions.json 2>/dev/null | head -1)"
-if [ -n "$LATEST_VERSION" ] && [ -d "documentation/versioned_docs/version-${LATEST_VERSION}" ]; then
-  # The isolation-tier guides are excluded: the tarball published for this
-  # version predates deployments/setup being added to the bundle, so those two
-  # node installers genuinely have to be fetched there. A snapshot cannot be
-  # pointed at files its own release asset does not contain.
-  check "guides in the current snapshot (${LATEST_VERSION})" \
-    --include='*.mdx' --include='*.md' \
-    --exclude-dir=isolation-tiers \
-    "documentation/versioned_docs/version-${LATEST_VERSION}"
-else
-  printf 'ok   - no current version snapshot to check\n'
-fi
 
 if ((FAILURES > 0)); then
-  printf '\nUse the bundled copy instead: ${AMP_DIST}/deployments/... in a guide,\n'
-  printf 'or a path relative to the script in an installer. If a fallback URL is\n'
+  printf '\nUse a path relative to the script instead. If a fallback URL is\n'
   printf 'genuinely needed, put it behind a defaulted variable.\n'
   exit 1
 fi

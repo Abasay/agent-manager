@@ -24,8 +24,13 @@ import {
   useFormValidation,
   useDirtyState,
 } from "@agent-management-platform/views";
-import { absoluteRouteMap } from "@agent-management-platform/types";
-import { createRoleSchema, type CreateRoleFormValues } from "./forms/schemas";
+import { useUnsavedChangesGuard } from "@agent-management-platform/shared-component";
+import { absoluteRouteMap, INPUT_LIMITS } from "@agent-management-platform/types";
+import {
+  createRoleSchema,
+  IDENTITY_NAME_MAX_LENGTH,
+  type CreateRoleFormValues,
+} from "./forms/schemas";
 
 export const RoleCreatePage: React.FC = () => {
   const { orgId } = useParams<{ orgId: string }>();
@@ -38,7 +43,8 @@ export const RoleCreatePage: React.FC = () => {
 
   const { errors, validateField, validateForm, clearErrors, setFieldError } =
     useFormValidation<CreateRoleFormValues>(createRoleSchema);
-  const { checkDirty, resetDirty } = useDirtyState(formData);
+  const { isDirty, checkDirty, resetDirty } = useDirtyState(formData);
+  const { allowNavigation } = useUnsavedChangesGuard(isDirty);
   const [lastSubmittedValidationErrors, setLastSubmittedValidationErrors] =
     useState<typeof errors>({});
 
@@ -83,11 +89,13 @@ export const RoleCreatePage: React.FC = () => {
       });
       resetDirty();
       clearErrors();
-      navigate(
-        generatePath(
-          absoluteRouteMap.children.org.children.settings.children.identities
-            .children.roles.children.detail.path,
-          { orgId, roleId: created.id },
+      allowNavigation(() =>
+        navigate(
+          generatePath(
+            absoluteRouteMap.children.org.children.settings.children.identities
+              .children.roles.children.detail.path,
+            { orgId, roleId: created.id },
+          ),
         ),
       );
     } catch {
@@ -101,6 +109,7 @@ export const RoleCreatePage: React.FC = () => {
     orgId,
     resetDirty,
     clearErrors,
+    allowNavigation,
     navigate,
   ]);
 
@@ -121,6 +130,7 @@ export const RoleCreatePage: React.FC = () => {
             <Form.Stack spacing={2}>
               <Form.ElementWrapper label="Name" name="name">
                 <TextField
+                  slotProps={{ htmlInput: { maxLength: IDENTITY_NAME_MAX_LENGTH } }}
                   id="name"
                   value={formData.name}
                   onChange={(e) => handleFieldChange("name", e.target.value)}
@@ -137,6 +147,7 @@ export const RoleCreatePage: React.FC = () => {
                 name="description"
               >
                 <TextField
+                  slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.DESCRIPTION } }}
                   id="description"
                   value={formData.description}
                   onChange={(e) =>
@@ -167,7 +178,7 @@ export const RoleCreatePage: React.FC = () => {
             <Button
               variant="outlined"
               color="primary"
-              onClick={() => navigate(rolesPath)}
+              onClick={() => allowNavigation(() => navigate(rolesPath))}
             >
               Cancel
             </Button>

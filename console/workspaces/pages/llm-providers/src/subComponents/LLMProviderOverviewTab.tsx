@@ -28,6 +28,7 @@ import {
   InvokeEndpoints,
   type InvokeEndpoint,
   SwaggerSpecViewer,
+  useUnsavedChangesGuard,
 } from "@agent-management-platform/shared-component";
 import {
   useCreateLLMProviderAPIKey,
@@ -57,9 +58,10 @@ import {
   Download,
   Save,
 } from "@wso2/oxygen-ui-icons-react";
-import type {
-  LLMProviderResponse,
-  UpdateLLMProviderRequest,
+import {
+  type LLMProviderResponse,
+  type UpdateLLMProviderRequest,
+  INPUT_LIMITS,
 } from "@agent-management-platform/types";
 import { parseOpenApiSpec } from "../utils/openapiResources";
 
@@ -132,6 +134,8 @@ export function LLMProviderOverviewTab({
   const hasOpenapiChanged =
     openapiValue.trim() !==
     (providerData?.openapi?.trim() ?? openapiSpecUrl ?? "").trim();
+
+  useUnsavedChangesGuard(hasOpenapiChanged);
 
   const swaggerSource = useMemo(() => {
     const v = openapiValue.trim();
@@ -559,6 +563,7 @@ export function LLMProviderOverviewTab({
         </Typography>
         <Stack direction="row" spacing={1} alignItems="flex-start">
           <TextField
+            slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.URL } }}
             size="small"
             fullWidth
             value={openapiValue}

@@ -5,8 +5,9 @@ name: WSO2 AI Agent Management Platform Release Promotion
 # bundle) is regenerated from the source release's own commit. See
 # docs/superpowers/specs/2026-09-07-release-promotion-design.md.
 #
-# The documentation release for the target version must already be merged to main
-# before this runs; the validate job refuses to proceed otherwise.
+# The documentation release for the target version must already be merged in
+# wso2/docs-agent-platform before this runs; the validate job refuses to proceed
+# otherwise.
 #
 # Recovering from a mid-way failure
 # ---------------------------------
@@ -126,7 +127,6 @@ jobs:
           echo "docs-version=$DOCS_VERSION" >> $GITHUB_OUTPUT
           bash .github/scripts/assert-docs-version-published.sh \
             "$DOCS_VERSION" \
-            "./documentation/versions.json" \
             "$TARGET_VERSION"
         env:
           TARGET_VERSION: ${{ inputs.target_version }}
@@ -240,17 +240,6 @@ jobs:
           COMMIT_SHA: ${{ steps.resolve.outputs.commit-sha }}
         shell: bash
 
-      # The base commit predates the documentation release for this version, so
-      # update-helm-charts.sh would fail its own manifest check against a stale
-      # versions.json even though validate already confirmed the docs are live.
-      # Only the manifest is synced — versioned_docs/ is deliberately left alone.
-      - name: Sync documentation manifest from main
-        run: |
-          git fetch origin main
-          git checkout origin/main -- documentation/versions.json
-          echo "✅ Synced documentation/versions.json from main"
-        shell: bash
-
       # From the tooling checkout, not the release tree: the docs-version rule is
       # policy about the target version, and the rc's frozen copy of it would
       # decide where this release's console doc links point. The seds still run
@@ -282,13 +271,11 @@ jobs:
 
       # A promotion that stamped nothing means the placeholders were already
       # consumed, which resolve-source-commit.sh is supposed to make impossible.
-      # versions.json is excluded because the sync above always stages it, which
-      # would otherwise satisfy this check on its own.
       - name: Commit version updates
         run: |
           git add -A
 
-          if git diff --staged --quiet -- . ':(exclude)documentation/versions.json'; then
+          if git diff --staged --quiet; then
             echo "Error: no version changes were produced from commit ${COMMIT_SHA:0:7}."
             exit 1
           fi

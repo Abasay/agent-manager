@@ -58,6 +58,8 @@ import type {
 import {
   RestrictedAction,
   useAgentEnvironmentAccess,
+  useConfirmIfUnsaved,
+  useUnsavedChangesGuard,
 } from "@agent-management-platform/shared-component";
 import {
   compatibleInstrumentationVersions,
@@ -179,6 +181,8 @@ export function PromoteAgentDrawer({
   // Tracks which target env we've already pre-filled the editor for, so we fill
   // once per target rather than on every background refetch.
   const [filledForTarget, setFilledForTarget] = useState<string | null>(null);
+  // env/files as seeded for the current target, to detect user edits.
+  const [seededConfigSnapshot, setSeededConfigSnapshot] = useState<string | null>(null);
 
   // True once the target's config has loaded AND been seeded into formState.
   // Gates Add/Upload so a user can't add/merge entries into the editor while
@@ -191,6 +195,7 @@ export function PromoteAgentDrawer({
   useEffect(() => {
     if (!open) {
       setFilledForTarget(null);
+      setSeededConfigSnapshot(null);
       setFormState(DEFAULT_STATE);
       resetMutation();
       return;
@@ -223,11 +228,13 @@ export function PromoteAgentDrawer({
       secretRef: e.secretRef,
       isSystem: e.isSystem,
     })));
+    const seededFiles = seedFileMountRows(cfg?.files);
     setFormState((prev) => ({
       ...prev,
       env: displayEnv,
-      files: seedFileMountRows(cfg?.files),
+      files: seededFiles,
     }));
+    setSeededConfigSnapshot(JSON.stringify({ env: displayEnv, files: seededFiles }));
     setFilledForTarget(target);
   }, [
     open,
@@ -261,6 +268,34 @@ export function PromoteAgentDrawer({
     agent,
     compatibleInstrumentation,
   ]);
+
+  // Env/files edited for the current target; re-seeded (and so lost) when the
+  // target changes.
+  const isTargetConfigDirty =
+    targetConfigReady &&
+    seededConfigSnapshot !== null &&
+    JSON.stringify({ env: formState.env, files: formState.files }) !==
+      seededConfigSnapshot;
+  const isDirty =
+    open &&
+    (formState.useConfigFromSourceEnv !== DEFAULT_STATE.useConfigFromSourceEnv ||
+      formState.instrumentationVersionDirty ||
+      isTargetConfigDirty);
+  // onClose drops a URL param, so the guard would otherwise block the
+  // deliberate Cancel and post-save closes too.
+  const { allowNavigation } = useUnsavedChangesGuard(isDirty);
+  const confirmIfUnsaved = useConfirmIfUnsaved();
+
+  const handleTargetChange = useCallback(
+    (targetEnvironment: string) => {
+      if (targetEnvironment === formState.targetEnvironment) return;
+      confirmIfUnsaved(
+        () => setFormState((prev) => ({ ...prev, targetEnvironment })),
+        isTargetConfigDirty,
+      );
+    },
+    [confirmIfUnsaved, formState.targetEnvironment, isTargetConfigDirty],
+  );
 
   const handleToggleUseSourceConfig = useCallback((checked: boolean) => {
     setFormState((prev) => ({ ...prev, useConfigFromSourceEnv: checked }));
@@ -376,7 +411,7 @@ export function PromoteAgentDrawer({
                 }),
           },
         });
-        onClose();
+        allowNavigation(onClose);
       } catch {
         // handled by error
       }
@@ -433,10 +468,7 @@ export function PromoteAgentDrawer({
                         size="small"
                         value={formState.targetEnvironment}
                         onChange={(e) =>
-                          setFormState((prev) => ({
-                            ...prev,
-                            targetEnvironment: e.target.value as string,
-                          }))
+                          handleTargetChange(e.target.value as string)
                         }
                         displayEmpty
                         disabled={isPending}
@@ -672,7 +704,7 @@ export function PromoteAgentDrawer({
               <Button
                 variant="outlined"
                 color="inherit"
-                onClick={onClose}
+                onClick={() => allowNavigation(onClose)}
                 disabled={isPending}
               >
                 Cancel

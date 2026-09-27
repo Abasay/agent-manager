@@ -2,10 +2,10 @@
 # resolve-docs-version.sh — print the documentation version a release points at.
 #
 # The value is consumed as the path segment after /docs/ (see the console's
-# DOCS_URL in the wso2-agent-manager chart), so it must match a directory in
-# documentation/versioned_docs/version-<docs-version> and an entry in
-# documentation/versions.json exactly. Docs versions are cut per release version,
-# so this is just "v" plus the release version.
+# DOCS_URL in the wso2-agent-manager chart), so it must match a published version
+# in wso2/docs-agent-platform exactly - a versioned_docs/version-<docs-version>
+# directory and an entry in versions.json there. Docs versions are cut per
+# release version, so this is just "v" plus the release version.
 #
 # Prints nothing (exit 0) for releases that cut no docs version: release
 # candidates and nightlies follow /docs/latest.

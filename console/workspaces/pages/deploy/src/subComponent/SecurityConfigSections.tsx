@@ -20,9 +20,10 @@ import {
   useGetAgent,
   useListEnvironmentIdentityProviders,
 } from "@agent-management-platform/api-client";
-import type {
-  ConfigurationResponse,
-  UpdateAgentDeploySettingsRequest,
+import {
+  type ConfigurationResponse,
+  type UpdateAgentDeploySettingsRequest,
+  INPUT_LIMITS,
 } from "@agent-management-platform/types";
 import {
   Accordion,
@@ -391,7 +392,11 @@ export const SecurityConfigSections = forwardRef<SecurityConfigHandle, SecurityC
                             ))
                           }
                           renderInput={(params) => (
-                            <TextField {...params} size="small" placeholder="Add origin and press Enter" />
+                            <TextField {...params} size="small" placeholder="Add origin and press Enter"
+                              slotProps={{
+                                htmlInput: { ...params.inputProps, maxLength: INPUT_LIMITS.URL },
+                              }}
+                            />
                           )}
                         />
                       </FormControl>
@@ -415,7 +420,11 @@ export const SecurityConfigSections = forwardRef<SecurityConfigHandle, SecurityC
                           ))
                         }
                         renderInput={(params) => (
-                          <TextField {...params} size="small" placeholder="Add method and press Enter" />
+                          <TextField {...params} size="small" placeholder="Add method and press Enter"
+                            slotProps={{
+                              htmlInput: { ...params.inputProps, maxLength: INPUT_LIMITS.KEY },
+                            }}
+                          />
                         )}
                       />
                     </FormControl>
@@ -438,7 +447,11 @@ export const SecurityConfigSections = forwardRef<SecurityConfigHandle, SecurityC
                           ))
                         }
                         renderInput={(params) => (
-                          <TextField {...params} size="small" placeholder="Add header and press Enter" />
+                          <TextField {...params} size="small" placeholder="Add header and press Enter"
+                            slotProps={{
+                              htmlInput: { ...params.inputProps, maxLength: INPUT_LIMITS.KEY },
+                            }}
+                          />
                         )}
                       />
                     </FormControl>
@@ -590,6 +603,7 @@ export const SecurityConfigSections = forwardRef<SecurityConfigHandle, SecurityC
                   <FormControl fullWidth>
                     <FormLabel>Header name</FormLabel>
                     <TextField
+                      slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.KEY } }}
                       size="small"
                       fullWidth
                       value={oauthHeaderName}
@@ -601,6 +615,7 @@ export const SecurityConfigSections = forwardRef<SecurityConfigHandle, SecurityC
                   <FormControl fullWidth>
                     <FormLabel>Auth header prefix</FormLabel>
                     <TextField
+                      slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.VALUE } }}
                       size="small"
                       fullWidth
                       value={oauthHeaderPrefix}

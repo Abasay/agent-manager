@@ -19,7 +19,7 @@ This repo is a **multi-aspect monorepo**. Each aspect has its own `AGENTS.md` wi
 | **Instrumentation init container** | `python-instrumentation-provider/` | Python + Docker (K8s init) | [`python-instrumentation-provider/AGENTS.md`](python-instrumentation-provider/AGENTS.md) |
 | **E2E tests** | `test/e2e/` | Go, Ginkgo + Gomega | [`test/e2e/AGENTS.md`](test/e2e/AGENTS.md) |
 
-Other dirs: `documentation/` (Docusaurus site), `deployments/` (Helm charts), `samples/` (example agents), `scripts/` (dev tooling). These have no dedicated guide yet.
+Other dirs: `deployments/` (Helm charts), `samples/` (example agents), `scripts/` (dev tooling). These have no dedicated guide yet. The documentation site lives in a separate repository, [wso2/docs-agent-platform](https://github.com/wso2/docs-agent-platform).
 
 ## Task skills
 

@@ -247,6 +247,8 @@ interface PolicyParameterEditorProps {
   onSubmit: (values: ParameterValues) => void;
   isEditMode?: boolean;
   disabled?: boolean;
+  /** Reports whether the values differ from their initial/existing ones. */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 const PolicyParameterEditor: React.FC<PolicyParameterEditorProps> = ({
@@ -257,6 +259,7 @@ const PolicyParameterEditor: React.FC<PolicyParameterEditorProps> = ({
   onSubmit,
   isEditMode = false,
   disabled = false,
+  onDirtyChange,
 }) => {
   const { name, description, parameters } = policyDefinition;
   const displayName = policyDisplayName || name;
@@ -265,6 +268,17 @@ const PolicyParameterEditor: React.FC<PolicyParameterEditorProps> = ({
     initializeDefaultValues(parameters, existingValues),
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const initialValuesJson = useMemo(
+    () => JSON.stringify(initializeDefaultValues(parameters, existingValues)),
+    [parameters, existingValues],
+  );
+  const isDirty = JSON.stringify(values) !== initialValuesJson;
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
+  // Unmounting drops the values, so stop reporting them as unsaved.
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   const levelOneValid = useMemo(
     () => isLevelOneValid(parameters, values),

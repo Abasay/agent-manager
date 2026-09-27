@@ -112,7 +112,10 @@ export const EditMonitorComponent: React.FC = () => {
   }, [monitorData]);
 
   const handleUpdateMonitor = useCallback(
-    (values: CreateMonitorFormValues) => {
+    (
+      values: CreateMonitorFormValues,
+      allowNavigation: (action: () => void) => void,
+    ) => {
       if (!orgId || !projectId || !agentId || !monitorId) {
         return;
       }
@@ -141,7 +144,7 @@ export const EditMonitorComponent: React.FC = () => {
 
       updateMonitor(payload, {
         onSuccess: () => {
-          navigate(backHref);
+          allowNavigation(() => navigate(backHref));
         },
       });
     },

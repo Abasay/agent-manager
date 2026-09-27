@@ -49,7 +49,10 @@ export const CreateEvaluatorOrganization: React.FC = () => {
   const backHref = generatePath(evaluatorsRouteMap.path, { orgId });
 
   const handleSubmit = useCallback(
-    (values: EvaluatorFormValues) => {
+    (
+      values: EvaluatorFormValues,
+      allowNavigation: (action: () => void) => void,
+    ) => {
       const body: CreateCustomEvaluatorRequest = {
         displayName: values.displayName,
         description: values.description,
@@ -61,7 +64,7 @@ export const CreateEvaluatorOrganization: React.FC = () => {
       };
       createEvaluator(body, {
         onSuccess: () => {
-          navigate(backHref);
+          allowNavigation(() => navigate(backHref));
         },
       });
     },

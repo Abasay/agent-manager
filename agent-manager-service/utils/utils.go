@@ -973,6 +973,7 @@ func ValidateFileMounts(files []spec.FileMount) error {
 	if len(files) == 0 {
 		return nil
 	}
+	limits := config.GetConfig().FileMountLimits
 	seenKeys := make(map[string]bool, len(files))
 	seenPaths := make(map[string]bool, len(files))
 	total := 0
@@ -1019,13 +1020,13 @@ func ValidateFileMounts(files []spec.FileMount) error {
 		if f.Value != nil {
 			valueLen = len(*f.Value)
 		}
-		if valueLen > MaxFileMountValueBytes {
-			return fmt.Errorf("file mount %q value is %d bytes; max %d", f.Key, valueLen, MaxFileMountValueBytes)
+		if valueLen > limits.MaxFileBytes {
+			return fmt.Errorf("file mount %q value is %d bytes; max %d", f.Key, valueLen, limits.MaxFileBytes)
 		}
 		total += valueLen
 	}
-	if total > MaxFileMountsTotalBytes {
-		return fmt.Errorf("file mounts total size %d bytes exceeds limit %d", total, MaxFileMountsTotalBytes)
+	if total > limits.MaxTotalBytes {
+		return fmt.Errorf("file mounts total size %d bytes exceeds limit %d", total, limits.MaxTotalBytes)
 	}
 	return nil
 }

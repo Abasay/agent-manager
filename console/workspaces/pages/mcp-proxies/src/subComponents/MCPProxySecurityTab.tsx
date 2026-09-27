@@ -22,12 +22,13 @@ import {
   useUpdateMCPProxyScope,
 } from "@agent-management-platform/api-client";
 import { useConfirmationDialog } from "@agent-management-platform/shared-component";
-import type {
-  APIKeyLocation,
-  Environment,
-  MCPEndpointConfig,
-  MCPProxy,
-  MCPProxyScopeResponse,
+import {
+  type APIKeyLocation,
+  type Environment,
+  type MCPEndpointConfig,
+  type MCPProxy,
+  type MCPProxyScopeResponse,
+  INPUT_LIMITS,
 } from "@agent-management-platform/types";
 import {
   Alert,
@@ -162,6 +163,8 @@ export type MCPProxySecurityTabProps = {
   isLoading?: boolean;
   onUpdate: (fields: Partial<MCPEndpointConfig>) => Promise<MCPProxy>;
   isUpdating: boolean;
+  /** Reports unsaved edits so the parent can guard tab, endpoint and page switches. */
+  onDirtyChange?: (dirty: boolean) => void;
 };
 
 export function MCPProxySecurityTab({
@@ -173,6 +176,7 @@ export function MCPProxySecurityTab({
   isLoading = false,
   onUpdate,
   isUpdating,
+  onDirtyChange,
 }: MCPProxySecurityTabProps) {
   const [authenticationType, setAuthenticationType] =
     useState<AuthenticationType>("apiKey");
@@ -357,6 +361,25 @@ export function MCPProxySecurityTab({
   // Gates every control a save touches, so no edit or second Save can land
   // while updates are still in flight.
   const saveInProgress = isUpdating || isSaving;
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
+
+  // Unmounting drops the edits, so stop the parent guarding for them.
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+
+  // The Save bar is easy to miss on a long page, so warn before a reload or
+  // tab close would silently drop pending edits.
+  useEffect(() => {
+    if (!isDirty) return undefined;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty]);
 
   const handleDiscard = useCallback(() => {
     if (!config) return;
@@ -731,6 +754,7 @@ export function MCPProxySecurityTab({
                 {keyIn === "query" ? "Query Param Key" : "Header Key"}
               </FormLabel>
               <TextField
+                slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.KEY } }}
                 size="small"
                 value={keyValue}
                 onChange={(e) => {
@@ -750,37 +774,62 @@ export function MCPProxySecurityTab({
         </Grid>
       )}
 
-      <Stack spacing={1.5} width="100%">
-        {/* Success messages hide as soon as the user edits again, but errors
-            must not: a failed save leaves the rows it couldn't commit dirty,
-            which would otherwise swallow the only report of the failure. */}
-        <Collapse in={!!status && (status.severity === "error" || !isDirty)} timeout={300}>
-          {status && (
-            <Alert
-              severity={status.severity}
-              onClose={() => setStatus(null)}
-              sx={{ width: "100%", maxWidth: 480 }}
-            >
-              {status.message}
-            </Alert>
-          )}
-        </Collapse>
-        <Stack direction="row" spacing={1.5} justifyContent="flex-end">
-          <Button
-            variant="outlined"
-            onClick={handleDiscard}
-            disabled={!isDirty || saveInProgress}
+      {/* Success messages hide as soon as the user edits again, but errors
+          must not: a failed save leaves the rows it couldn't commit dirty,
+          which would otherwise swallow the only report of the failure. */}
+      <Collapse in={!!status && (status.severity === "error" || !isDirty)} timeout={300}>
+        {status && (
+          <Alert
+            severity={status.severity}
+            onClose={() => setStatus(null)}
+            sx={{ width: "100%", maxWidth: 480 }}
           >
-            Discard
-          </Button>
-          <Button
-            variant="contained"
-            onClick={() => void handleSave()}
-            disabled={saveInProgress || !isDirty}
-          >
-            {saveInProgress ? "Saving..." : "Save"}
-          </Button>
-        </Stack>
+            {status.message}
+          </Alert>
+        )}
+      </Collapse>
+      {/* Sticky so Save stays reachable — confirming an auth-method switch
+          only updates the form, and a Save scrolled out of view left users
+          navigating away thinking the change had applied. */}
+      <Stack
+        direction="row"
+        spacing={1.5}
+        alignItems="center"
+        justifyContent="flex-end"
+        sx={{
+          position: "sticky",
+          bottom: 0,
+          zIndex: 1,
+          py: 1.5,
+          bgcolor: "background.paper",
+          borderTop: 1,
+          borderColor: isDirty ? "divider" : "transparent",
+        }}
+      >
+        {/* Kept mounted so screen readers announce when edits become unsaved. */}
+        <Typography
+          variant="body2"
+          color="warning.main"
+          role="status"
+          aria-live="polite"
+          sx={{ mr: "auto" }}
+        >
+          {isDirty ? "You have unsaved changes" : ""}
+        </Typography>
+        <Button
+          variant="outlined"
+          onClick={handleDiscard}
+          disabled={!isDirty || saveInProgress}
+        >
+          Discard
+        </Button>
+        <Button
+          variant="contained"
+          onClick={() => void handleSave()}
+          disabled={saveInProgress || !isDirty}
+        >
+          {saveInProgress ? "Saving..." : "Save"}
+        </Button>
       </Stack>
 
       {orgName && proxyId && (

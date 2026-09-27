@@ -19,12 +19,17 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { Alert, Form } from "@wso2/oxygen-ui";
 import { PageLayout, useFormValidation } from "@agent-management-platform/views";
+import { useUnsavedChangesGuard } from "@agent-management-platform/shared-component";
 import { generatePath, useNavigate, useParams } from "react-router-dom";
 import {
   absoluteRouteMap,
   OrgProjPathParams,
 } from "@agent-management-platform/types";
-import { useCreateAgent, useGetDeploymentPipeline } from "@agent-management-platform/api-client";
+import {
+  useAgentBuildOptions,
+  useCreateAgent,
+  useGetDeploymentPipeline,
+} from "@agent-management-platform/api-client";
 import { createAgentSchema, type CreateAgentFormValues, type LLMProviderFormEntry, type MCPProxyFormEntry } from "../form/schema";
 import { InternalAgentForm } from "../forms/InternalAgentForm";
 import { CreateButtons } from "./CreateButtons";
@@ -45,7 +50,7 @@ export const InternalAgentFlow: React.FC = () => {
     projectId?: string;
   }>();
 
-  const [formData, setFormData] = useState<CreateAgentFormValues>({
+  const [initialFormData] = useState<CreateAgentFormValues>(() => ({
     deploymentType: "new" as const,
     enableAutoInstrumentation: true,
     // instrumentationVersion and languageVersion start undefined and get
@@ -67,7 +72,8 @@ export const InternalAgentFlow: React.FC = () => {
     openApiPath: "",
     env: [],
     files: [],
-  });
+  }));
+  const [formData, setFormData] = useState<CreateAgentFormValues>(initialFormData);
 
   const { errors, validateForm, setFieldError, validateField } =
     useFormValidation<CreateAgentFormValues>(createAgentSchema);
@@ -76,6 +82,41 @@ export const InternalAgentFlow: React.FC = () => {
   const [mcpProxies, setMCPProxies] = useState<MCPProxyFormEntry[]>([]);
 
   const { mutate: createAgent, isPending, error } = useCreateAgent();
+
+  // InternalAgentForm seeds languageVersion / instrumentationVersion from the
+  // build options once they load. Mirror that seeding here (same cached
+  // query) so the seeded defaults are the baseline and only a user's change
+  // to either version counts as an edit.
+  const { data: buildOptions } = useAgentBuildOptions({ orgName: orgId ?? "" });
+  const baselineFormData = useMemo<CreateAgentFormValues>(() => {
+    if (!buildOptions) return initialFormData;
+    const languageVersion = buildOptions.python.defaultVersion;
+    const defaultInstrumentation = buildOptions.instrumentation.defaultVersion;
+    const compat = buildOptions.instrumentation.versions.filter((v) =>
+      v.pythonVersions.includes(languageVersion),
+    );
+    const instrumentationVersion = compat.some((c) => c.version === defaultInstrumentation)
+      ? defaultInstrumentation
+      : (compat[0]?.version ?? null);
+    return { ...initialFormData, languageVersion, instrumentationVersion };
+  }, [buildOptions, initialFormData]);
+  const isDirty = useMemo(() => {
+    // Until the form has applied its seeding, an unseeded version isn't an edit.
+    const withSeeded = (values: CreateAgentFormValues) => ({
+      ...values,
+      languageVersion: values.languageVersion ?? baselineFormData.languageVersion,
+      instrumentationVersion:
+        values.instrumentationVersion === undefined
+          ? baselineFormData.instrumentationVersion
+          : values.instrumentationVersion,
+    });
+    return (
+      llmProviders.length > 0 ||
+      mcpProxies.length > 0 ||
+      JSON.stringify(withSeeded(formData)) !== JSON.stringify(baselineFormData)
+    );
+  }, [formData, baselineFormData, llmProviders, mcpProxies]);
+  const { allowNavigation } = useUnsavedChangesGuard(isDirty);
 
   const params = useMemo<OrgProjPathParams>(
     () => ({
@@ -100,13 +141,15 @@ export const InternalAgentFlow: React.FC = () => {
   const firstEnvOnlyNotice = multipleEnvironments ? initialEnvironmentName : undefined;
 
   const handleCancel = useCallback(() => {
-    navigate(
-      generatePath(absoluteRouteMap.children.org.children.projects.path, {
-        orgId: orgId ?? "",
-        projectId: projectId ?? "default",
-      })
+    allowNavigation(() =>
+      navigate(
+        generatePath(absoluteRouteMap.children.org.children.projects.path, {
+          orgId: orgId ?? "",
+          projectId: projectId ?? "default",
+        })
+      )
     );
-  }, [navigate, orgId, projectId]);
+  }, [allowNavigation, navigate, orgId, projectId]);
 
   const [lastSubmittedValidationErrors, setLastSubmittedValidationErrors] = useState<
     Record<string, string | undefined>
@@ -136,15 +179,17 @@ export const InternalAgentFlow: React.FC = () => {
     );
     createAgent(payload, {
       onSuccess: () => {
-        navigate(
-          generatePath(
-            absoluteRouteMap.children.org.children.projects.children.agents.path,
-            {
-              orgId: params.orgName ?? "",
-              projectId: params.projName ?? "",
-              agentId: payload.body.name,
-            }
-          ) + "?setup=true"
+        allowNavigation(() =>
+          navigate(
+            generatePath(
+              absoluteRouteMap.children.org.children.projects.children.agents.path,
+              {
+                orgId: params.orgName ?? "",
+                projectId: params.projName ?? "",
+                agentId: payload.body.name,
+              }
+            ) + "?setup=true"
+          )
         );
       },
       onError: (e: unknown) => {
@@ -157,6 +202,7 @@ export const InternalAgentFlow: React.FC = () => {
     formData,
     createAgent,
     navigate,
+    allowNavigation,
     params,
     errors,
     llmProviders,

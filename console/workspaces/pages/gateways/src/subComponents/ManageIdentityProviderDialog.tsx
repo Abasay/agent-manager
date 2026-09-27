@@ -50,11 +50,14 @@ import {
   globalConfig,
   type GatewayEnvironmentResponse,
   type IdentityProvider,
+  INPUT_LIMITS,
 } from "@agent-management-platform/types";
 import {
   getAgentManagerUrl,
   getAmpVersionHelm,
   getRawScriptUrl,
+  useConfirmIfUnsaved,
+  useUnsavedChangesGuard,
 } from "@agent-management-platform/shared-component";
 
 const SCRIPT_NAME = "manage-identity-provider.sh";
@@ -245,6 +248,22 @@ export function ManageIdentityProviderDialog({
     }
   }, [open, isDelete, provider, lockedGateway]);
 
+  // Delete mode is read-only; in upsert mode only user-entered values count.
+  const isDirty =
+    open &&
+    !isDelete &&
+    (!!name.trim() ||
+      !!issuer.trim() ||
+      !!jwksUri.trim() ||
+      skipTlsVerify ||
+      !!discoveryUrl.trim() ||
+      (!isGatewayLocked && !!envName));
+  useUnsavedChangesGuard(isDirty);
+  const confirmIfUnsaved = useConfirmIfUnsaved();
+  // Backdrop and header X discard edits, so confirm first; Cancel and the
+  // post-save close stay direct.
+  const handleGuardedClose = () => confirmIfUnsaved(onClose, isDirty);
+
   // Clear the gateway selection when the environment changes (upsert flow only —
   // a locked gateway stays fixed regardless of environment).
   useEffect(() => {
@@ -370,11 +389,11 @@ export function ManageIdentityProviderDialog({
   );
 
   return (
-    <DrawerWrapper open={open} onClose={onClose}>
+    <DrawerWrapper open={open} onClose={handleGuardedClose}>
       <DrawerHeader
         icon={isDelete ? <Trash size={24} /> : <KeyRound size={24} />}
         title={isDelete ? "Remove Identity Provider" : "Add Identity Provider"}
-        onClose={onClose}
+        onClose={handleGuardedClose}
       />
       <DrawerContent>
         <Stack spacing={3}>
@@ -413,6 +432,7 @@ export function ManageIdentityProviderDialog({
             <FormControl fullWidth disabled={isDelete}>
               <FormLabel required>Name</FormLabel>
               <TextField
+                slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.NAME } }}
                 size="small"
                 fullWidth
                 value={name}
@@ -428,6 +448,7 @@ export function ManageIdentityProviderDialog({
                   <FormLabel>Discover from URL (optional)</FormLabel>
                   <Stack direction="row" spacing={1}>
                     <TextField
+                      slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.URL } }}
                       size="small"
                       fullWidth
                       value={discoveryUrl}
@@ -453,6 +474,7 @@ export function ManageIdentityProviderDialog({
                 <FormControl fullWidth>
                   <FormLabel required>Issuer</FormLabel>
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.URL } }}
                     size="small"
                     fullWidth
                     value={issuer}
@@ -464,6 +486,7 @@ export function ManageIdentityProviderDialog({
                 <FormControl fullWidth>
                   <FormLabel required>JWKS URI</FormLabel>
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.URL } }}
                     size="small"
                     fullWidth
                     value={jwksUri}

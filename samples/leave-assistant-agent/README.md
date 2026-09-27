@@ -67,7 +67,7 @@ Ballerina reads `configurable` values from environment variables named `BAL_CONF
 BAL_CONFIG_VAR_OPENAIAPIKEY=<your-openai-api-key>
 ```
 
-This is different from every Python sample in this repository, which read a plain `OPENAI_API_KEY`. It's the same convention the [AMP instrumentation guide](../../documentation/docs/guides/amp-instrumentation.mdx) uses for `ballerinax/amp`'s own configurables, just applied to this agent's own key instead.
+This is different from every Python sample in this repository, which read a plain `OPENAI_API_KEY`. It's the same convention the [AMP instrumentation guide](https://github.com/wso2/docs-agent-platform/blob/main/docs/guides/amp-instrumentation.mdx) uses for `ballerinax/amp`'s own configurables, just applied to this agent's own key instead.
 
 ### Step 5: Deploy the Agent
 

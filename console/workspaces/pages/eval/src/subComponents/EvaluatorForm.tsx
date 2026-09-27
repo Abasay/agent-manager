@@ -16,7 +16,8 @@
  * under the License.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useUnsavedChangesGuard } from "@agent-management-platform/shared-component";
 import {
   Alert,
   Autocomplete,
@@ -48,9 +49,10 @@ import {
   X as CloseIcon,
 } from "@wso2/oxygen-ui-icons-react";
 import Editor, { type Monaco } from "@monaco-editor/react";
-import type {
-  EvaluatorConfigParam,
-  EvaluatorLevel,
+import {
+  type EvaluatorConfigParam,
+  type EvaluatorLevel,
+  INPUT_LIMITS,
 } from "@agent-management-platform/types";
 import {
   DataModelReferenceDrawer,
@@ -766,7 +768,10 @@ const emptyParam = (): EvaluatorConfigParam => ({
 });
 
 interface EvaluatorFormProps {
-  onSubmit: (values: EvaluatorFormValues) => void;
+  onSubmit: (
+    values: EvaluatorFormValues,
+    allowNavigation: (action: () => void) => void,
+  ) => void;
   isSubmitting: boolean;
   serverError?: unknown;
   submitLabel: string;
@@ -790,6 +795,12 @@ export function EvaluatorForm({
   const [errors, setErrors] = useState<
     Partial<Record<keyof EvaluatorFormValues, string>>
   >({});
+  const isDirty = useMemo(
+    () =>
+      JSON.stringify(values) !== JSON.stringify(initialValues ?? defaultValues),
+    [values, initialValues],
+  );
+  const { allowNavigation } = useUnsavedChangesGuard(isDirty);
   const [page, setPage] = useState<1 | 2>(1);
   const [referenceTypeKey, setReferenceTypeKey] =
     useState<ReferenceTypeKey | null>(null);
@@ -1027,9 +1038,9 @@ export function EvaluatorForm({
 
   const handleSubmit = useCallback(() => {
     if (validate()) {
-      onSubmit(values);
+      onSubmit(values, allowNavigation);
     }
-  }, [validate, onSubmit, values]);
+  }, [validate, onSubmit, values, allowNavigation]);
 
   const canAdvance = values.displayName.trim().length > 0;
 
@@ -1083,6 +1094,7 @@ export function EvaluatorForm({
             <Form.Header>Basic Details</Form.Header>
             <Form.ElementWrapper name="displayName" label="Name">
               <TextField
+                slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.NAME } }}
                 id="displayName"
                 placeholder="Enter evaluator name"
                 value={values.displayName}
@@ -1098,6 +1110,7 @@ export function EvaluatorForm({
             </Form.ElementWrapper>
             <Form.ElementWrapper name="description" label="Description">
               <TextField
+                slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.DESCRIPTION } }}
                 id="description"
                 placeholder="Describe what this evaluator checks"
                 value={values.description}
@@ -1551,6 +1564,7 @@ export function EvaluatorForm({
                         useFlexGap
                       >
                         <TextField
+                          slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.KEY } }}
                           placeholder="Key"
                           size="small"
                           value={param.key}
@@ -1559,6 +1573,7 @@ export function EvaluatorForm({
                           InputProps={{ sx: { fontFamily: "monospace" } }}
                         />
                         <TextField
+                          slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.SHORT_TEXT } }}
                           placeholder="Type"
                           size="small"
                           value={param.type}
@@ -1566,6 +1581,7 @@ export function EvaluatorForm({
                           sx={{ flex: 1, minWidth: 80 }}
                         />
                         <TextField
+                          slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.VALUE } }}
                           placeholder="Default"
                           size="small"
                           value={
@@ -1577,6 +1593,7 @@ export function EvaluatorForm({
                           sx={{ flex: 1.5, minWidth: 100 }}
                         />
                         <TextField
+                          slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.DESCRIPTION } }}
                           placeholder="Description"
                           size="small"
                           value={param.description}
@@ -1620,6 +1637,7 @@ export function EvaluatorForm({
                           useFlexGap
                         >
                           <TextField
+                            slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.KEY } }}
                             placeholder="Key"
                             size="small"
                             value={param.key}
@@ -1630,6 +1648,7 @@ export function EvaluatorForm({
                             InputProps={{ sx: { fontFamily: "monospace" } }}
                           />
                           <TextField
+                            slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.SHORT_TEXT } }}
                             select
                             placeholder="Type"
                             size="small"
@@ -1655,6 +1674,7 @@ export function EvaluatorForm({
                             ))}
                           </TextField>
                           <TextField
+                            slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.VALUE } }}
                             placeholder="Default"
                             size="small"
                             value={
@@ -1673,6 +1693,7 @@ export function EvaluatorForm({
                             sx={{ flex: 1.5, minWidth: 100 }}
                           />
                           <TextField
+                            slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.DESCRIPTION } }}
                             placeholder="Description"
                             size="small"
                             value={param.description}
@@ -1751,6 +1772,7 @@ export function EvaluatorForm({
 
                         {param.type === "enum" && (
                           <TextField
+                            slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.VALUE } }}
                             placeholder="value1, value2, value3"
                             size="small"
                             value={(param.enumValues ?? []).join(", ")}
@@ -1795,7 +1817,11 @@ export function EvaluatorForm({
                 ))
               }
               renderInput={(params) => (
-                <TextField {...params} placeholder="Add tags and press Enter" />
+                <TextField {...params} placeholder="Add tags and press Enter"
+                  slotProps={{
+                    htmlInput: { ...params.inputProps, maxLength: INPUT_LIMITS.SHORT_TEXT },
+                  }}
+                />
               )}
             />
           </Form.Section>

@@ -64,6 +64,7 @@ import {
   type ResourceItem,
 } from "../utils/openapiResources";
 import { z } from "zod";
+import { useUnsavedChangesGuard } from "@agent-management-platform/shared-component";
 
 const RESET_UNITS = [
   { value: "minute", label: "Minute(s)" },
@@ -652,6 +653,8 @@ export function LLMProviderRateLimitingTab({
     [filteredResources, resourcePage],
   );
 
+  const { allowNavigation } = useUnsavedChangesGuard(isDirty);
+
   const handleSave = useCallback(async () => {
     if (!providerData || isLoading) return;
 
@@ -785,9 +788,12 @@ export function LLMProviderRateLimitingTab({
               onChange={(_, v: "global" | "resourceWise" | null) => {
                 if (v) {
                   setProviderMode(v);
-                  setSearchParams(
-                    (prev) => { const next = new URLSearchParams(prev); next.set("mode", v); return next; },
-                    { replace: true },
+                  // ?mode= mirrors this in-form toggle, not a page change.
+                  allowNavigation(() =>
+                    setSearchParams(
+                      (prev) => { const next = new URLSearchParams(prev); next.set("mode", v); return next; },
+                      { replace: true },
+                    ),
                   );
                 }
               }}

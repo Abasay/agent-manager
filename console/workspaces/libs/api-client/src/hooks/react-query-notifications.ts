@@ -10,6 +10,7 @@ import {
 import { useSnackBar } from "@agent-management-platform/views";
 import { useEffect, useRef } from "react";
 import { useAuthHooks } from "@agent-management-platform/auth";
+import { isRequestTooLargeError } from "../utils";
 
 type MutationAction =
   | "assign"
@@ -350,7 +351,10 @@ export function useApiMutation<
         const subject = action?.target || "data";
         const fallbackMessage = `Failed to submit ${subject}`;
         pushSnackBar({
+          // A size refusal is checked first: it names what the user has to
+          // change, which a caller's generic failure text would hide.
           message:
+            (isRequestTooLargeError(error) ? error.message : undefined) ??
             resolveMessage(errorMessage, error, variables) ??
             extractServerErrorMessage(error, { maxReasonLength: MAX_SNACKBAR_REASON_LENGTH }) ??
             fallbackMessage,

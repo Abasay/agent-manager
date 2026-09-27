@@ -55,6 +55,7 @@ import {
   EditFormSkeleton,
   PermissionTree,
   type PermissionTreeItem,
+  useUnsavedChangesGuard,
 } from "@agent-management-platform/shared-component";
 import { PageLayout } from "@agent-management-platform/views";
 import { AgentNameWithProject } from "./AgentNameWithProject";
@@ -288,6 +289,9 @@ export const RoleEditPage: React.FC = () => {
   }, [isPermissionsReadOnly, initialScopeNames, selectedScopeIds]);
 
   const isDirty = scopesDirty || agentDelta.isDirty || groupDelta.isDirty;
+  const { allowNavigation } = useUnsavedChangesGuard(
+    (scopesDirty && hasEditedScopes.current) || agentDelta.isDirty || groupDelta.isDirty,
+  );
 
   if (isLoading) {
     return (
@@ -521,7 +525,7 @@ export const RoleEditPage: React.FC = () => {
           <Stack direction="row" spacing={1}>
             <Button
               variant="outlined"
-              onClick={() => navigate(rolesPath)}
+              onClick={() => allowNavigation(() => navigate(rolesPath))}
               disabled={isSaving}
             >
               Cancel

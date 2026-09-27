@@ -27,6 +27,7 @@ import {
   type AccessControlItem,
   type AccessControlMode,
   type AccessControlStatus,
+  useUnsavedChangesGuard,
 } from "@agent-management-platform/shared-component";
 import { useOpenApiSpec } from "../hooks/useOpenApiSpec";
 import {
@@ -191,6 +192,8 @@ export function LLMProviderAccessControlTab({
       openapiText !== saved.openapi
     );
   }, [mode, exceptionKeys, openapiText]);
+
+  useUnsavedChangesGuard(isDirty);
 
   const updateAccessControl = useCallback(async () => {
     if (!providerData) return;

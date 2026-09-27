@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Box, Button, Stack } from "@wso2/oxygen-ui";
 import { ArrowLeft, ArrowRight } from "@wso2/oxygen-ui-icons-react";
 import { PageLayout } from "@agent-management-platform/views";
+import { useUnsavedChangesGuard } from "@agent-management-platform/shared-component";
 import {
   createMonitorSchema,
   type CreateMonitorFormValues,
@@ -35,7 +36,10 @@ interface MonitorFormWizardProps {
   description?: string;
   backHref: string;
   submitLabel: string;
-  onSubmit: (values: CreateMonitorFormValues) => void;
+  onSubmit: (
+    values: CreateMonitorFormValues,
+    allowNavigation: (action: () => void) => void,
+  ) => void;
   initialValues: CreateMonitorFormValues;
   isSubmitting: boolean;
   serverError?: unknown;
@@ -69,6 +73,12 @@ export function MonitorFormWizard({
     setFormData(initialValues);
     setPage(1);
   }, [initialValues]);
+
+  const isDirty = useMemo(
+    () => JSON.stringify(formData) !== JSON.stringify(initialValues),
+    [formData, initialValues],
+  );
+  const { allowNavigation } = useUnsavedChangesGuard(isDirty);
 
   const {
     errors,
@@ -210,8 +220,15 @@ export function MonitorFormWizard({
       return;
     }
 
-    onSubmit(formData);
-  }, [formData, hasLLMJudge, missingParamsMessage, onSubmit, guardSubmit]);
+    onSubmit(formData, allowNavigation);
+  }, [
+    formData,
+    hasLLMJudge,
+    missingParamsMessage,
+    onSubmit,
+    guardSubmit,
+    allowNavigation,
+  ]);
 
   // In edit mode (isTypeEditable=false) traceStart/traceEnd errors don't block
   // navigation — the user may need to reach page 2 to change evaluators even when

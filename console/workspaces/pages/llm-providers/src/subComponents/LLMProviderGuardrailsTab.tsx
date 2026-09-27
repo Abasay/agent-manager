@@ -49,6 +49,7 @@ import { ChevronDown, Plus, Search, ShieldAlert } from "@wso2/oxygen-ui-icons-re
 import {
   PolicySelectorDrawer,
   type ParameterValues,
+  useUnsavedChangesGuard,
 } from "@agent-management-platform/shared-component";
 import { useOpenApiSpec } from "../hooks/useOpenApiSpec";
 import {
@@ -242,6 +243,8 @@ export function LLMProviderGuardrailsTab({
     if (lastSavedRef.current === null) return false;
     return JSON.stringify(localPolicies) !== lastSavedRef.current;
   }, [localPolicies]);
+
+  useUnsavedChangesGuard(isDirty);
 
   const handleSave = useCallback(async () => {
     const result = PoliciesPayloadSchema.safeParse({

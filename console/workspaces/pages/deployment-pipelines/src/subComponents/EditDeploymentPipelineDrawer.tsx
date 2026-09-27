@@ -38,8 +38,12 @@ import {
   useUpdateOrgDeploymentPipeline,
   useListEnvironments,
 } from "@agent-management-platform/api-client";
-import type { DeploymentPipelineResponse } from "@agent-management-platform/types";
-import { editPipelineSchema, type EditPipelineFormValues } from "../form/schema";
+import {
+  useConfirmIfUnsaved,
+  useUnsavedChangesGuard,
+} from "@agent-management-platform/shared-component";
+import { type DeploymentPipelineResponse, INPUT_LIMITS } from "@agent-management-platform/types";
+import { editPipelineSchema, type EditPipelineFormValues, PIPELINE_DISPLAY_NAME_MAX_LENGTH } from "../form/schema";
 import { chainToPromotionPaths } from "../utils/chainUtils";
 import { validatePromotionChain } from "../utils/validatePromotionChain";
 import { PipelineChainEditor } from "./PipelineChainEditor";
@@ -71,6 +75,7 @@ export function EditDeploymentPipelineDrawer(
     description: pipeline.description ?? "",
     chain: pipelineToChain(pipeline),
   }));
+  const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
 
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -89,15 +94,27 @@ export function EditDeploymentPipelineDrawer(
 
   useEffect(() => {
     if (open) {
-      setFormData({
+      const seed = {
         displayName: pipeline.displayName,
         description: pipeline.description ?? "",
         chain: pipelineToChain(pipeline),
-      });
+      };
+      setFormData(seed);
+      setInitialSnapshot(JSON.stringify(seed));
       setSubmitError(null);
       resetMutation();
     }
   }, [open, pipeline, resetMutation]);
+
+  const isDirty = useMemo(
+    () => open && initialSnapshot !== null && JSON.stringify(formData) !== initialSnapshot,
+    [open, initialSnapshot, formData],
+  );
+  useUnsavedChangesGuard(isDirty);
+  const confirmIfUnsaved = useConfirmIfUnsaved();
+  // Backdrop and header X discard edits, so confirm first; Cancel and the
+  // post-save close stay direct.
+  const handleGuardedClose = () => confirmIfUnsaved(onClose, isDirty);
 
   const handleFieldChange = useCallback(
     (field: "displayName" | "description", value: string) => {
@@ -150,8 +167,8 @@ export function EditDeploymentPipelineDrawer(
   const allFilled = formData.chain.every((v) => v !== "");
 
   return (
-    <DrawerWrapper open={open} onClose={onClose}>
-      <DrawerHeader icon={<Edit size={24} />} title="Edit Deployment Pipeline" onClose={onClose} />
+    <DrawerWrapper open={open} onClose={handleGuardedClose}>
+      <DrawerHeader icon={<Edit size={24} />} title="Edit Deployment Pipeline" onClose={handleGuardedClose} />
       <DrawerContent>
         <form onSubmit={handleSubmit}>
           <Stack spacing={3}>
@@ -167,6 +184,7 @@ export function EditDeploymentPipelineDrawer(
                 <FormControl fullWidth error={Boolean(errors.displayName)}>
                   <FormLabel required>Display Name</FormLabel>
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: PIPELINE_DISPLAY_NAME_MAX_LENGTH } }}
                     fullWidth
                     size="small"
                     value={formData.displayName}
@@ -180,6 +198,7 @@ export function EditDeploymentPipelineDrawer(
                 <FormControl fullWidth>
                   <FormLabel>Description</FormLabel>
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.DESCRIPTION } }}
                     fullWidth
                     size="small"
                     multiline

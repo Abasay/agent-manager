@@ -29,6 +29,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { PageLayout, useFormValidation } from "@agent-management-platform/views";
+import { useUnsavedChangesGuard } from "@agent-management-platform/shared-component";
 import { generatePath, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { absoluteRouteMap, type AgentKindVersionResponse, OrgProjPathParams } from "@agent-management-platform/types";
 import {
@@ -109,7 +110,7 @@ export const CatalogAgentFlow: React.FC = () => {
     [kind, effectiveVersion],
   );
 
-  const [formData, setFormData] = useState<CreateAgentFormValues>({
+  const [initialFormData] = useState<CreateAgentFormValues>(() => ({
     deploymentType: "new" as const,
     enableAutoInstrumentation: true,
     name: "",
@@ -130,7 +131,8 @@ export const CatalogAgentFlow: React.FC = () => {
     openApiPath: "",
     env: [],
     files: [],
-  });
+  }));
+  const [formData, setFormData] = useState<CreateAgentFormValues>(initialFormData);
 
   const { errors, validateForm, setFieldError, validateField } =
     useFormValidation<CreateAgentFormValues>(createAgentSchema);
@@ -167,6 +169,19 @@ export const CatalogAgentFlow: React.FC = () => {
 
   const [llmProviders, setLLMProviders] = useState<LLMProviderFormEntry[]>([]);
   const [mcpProxies, setMCPProxies] = useState<MCPProxyFormEntry[]>([]);
+
+  // env is reseeded from the selected version's schema, so compare it against
+  // that seed rather than the empty initial list.
+  const isDirty = useMemo(
+    () =>
+      selectedVersion !== "" ||
+      llmProviders.length > 0 ||
+      mcpProxies.length > 0 ||
+      JSON.stringify(formData) !==
+        JSON.stringify({ ...initialFormData, env: catalogEnvSeed.env }),
+    [selectedVersion, llmProviders, mcpProxies, formData, initialFormData, catalogEnvSeed.env],
+  );
+  const { allowNavigation } = useUnsavedChangesGuard(isDirty);
 
   const params = useMemo<OrgProjPathParams>(
     () => ({
@@ -211,13 +226,15 @@ export const CatalogAgentFlow: React.FC = () => {
   );
 
   const handleCancel = useCallback(() => {
-    navigate(
-      generatePath(absoluteRouteMap.children.org.children.projects.path, {
-        orgId: orgId ?? "",
-        projectId: projectId ?? "default",
-      })
+    allowNavigation(() =>
+      navigate(
+        generatePath(absoluteRouteMap.children.org.children.projects.path, {
+          orgId: orgId ?? "",
+          projectId: projectId ?? "default",
+        })
+      )
     );
-  }, [navigate, orgId, projectId]);
+  }, [allowNavigation, navigate, orgId, projectId]);
 
   const [lastSubmittedValidationErrors, setLastSubmittedValidationErrors] = useState<
     Record<string, string | undefined>
@@ -249,15 +266,17 @@ export const CatalogAgentFlow: React.FC = () => {
     );
     createAgent(payload, {
       onSuccess: () => {
-        navigate(
-          generatePath(
-            absoluteRouteMap.children.org.children.projects.children.agents.path,
-            {
-              orgId: params.orgName ?? "",
-              projectId: params.projName ?? "",
-              agentId: payload.body.name,
-            }
-          ) + "?setup=true"
+        allowNavigation(() =>
+          navigate(
+            generatePath(
+              absoluteRouteMap.children.org.children.projects.children.agents.path,
+              {
+                orgId: params.orgName ?? "",
+                projectId: params.projName ?? "",
+                agentId: payload.body.name,
+              }
+            ) + "?setup=true"
+          )
         );
       },
       onError: (e: unknown) => {
@@ -265,7 +284,8 @@ export const CatalogAgentFlow: React.FC = () => {
         console.error("Failed to create catalog agent:", e);
       },
     });
-  }, [validateForm, formData, createAgent, navigate, params, errors, llmProviders, kindId,
+  }, [validateForm, formData, createAgent, navigate, allowNavigation, params, errors,
+    llmProviders, kindId,
     mcpProxies, effectiveVersion, initialEnvironmentName]);
 
   const backHref = useMemo(() => {

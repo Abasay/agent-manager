@@ -28,9 +28,14 @@ import {
 } from "@agent-management-platform/views";
 import { z } from "zod";
 import { useUpdateAgent } from "@agent-management-platform/api-client";
-import { AgentResponse, UpdateAgentRequest } from "@agent-management-platform/types";
-import { LabelsEditor, MarkdownEditor } from "@agent-management-platform/shared-component";
-import { useEffect, useState, useCallback } from "react";
+import { AgentResponse, UpdateAgentRequest, INPUT_LIMITS } from "@agent-management-platform/types";
+import {
+  LabelsEditor,
+  MarkdownEditor,
+  useConfirmIfUnsaved,
+  useUnsavedChangesGuard,
+} from "@agent-management-platform/shared-component";
+import { useEffect, useState, useCallback, useMemo } from "react";
 
 interface EditAgentDrawerProps {
   open: boolean;
@@ -70,6 +75,7 @@ export function EditAgentDrawer({ open, onClose, agent, orgId, projectId }: Edit
     description: agent.description || '',
   });
   const [labels, setLabels] = useState<Record<string, string>>(agent.labels ?? {});
+  const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
   const { isFullscreen, toggle: toggleFullscreen, reset: resetFullscreen } = useDrawerFullscreen();
 
   const { errors, validateField, validateForm, clearErrors, setFieldError } =
@@ -80,16 +86,31 @@ export function EditAgentDrawer({ open, onClose, agent, orgId, projectId }: Edit
   // Reset form when agent changes or drawer opens
   useEffect(() => {
     if (open) {
-      setFormData({
+      const seed = {
         name: agent.name,
         displayName: agent.displayName,
         description: agent.description || '',
-      });
+      };
+      setFormData(seed);
       setLabels(agent.labels ?? {});
+      setInitialSnapshot(JSON.stringify({ formData: seed, labels: agent.labels ?? {} }));
       clearErrors();
       resetFullscreen();
     }
   }, [agent, open, clearErrors, resetFullscreen]);
+
+  const isDirty = useMemo(
+    () =>
+      open &&
+      initialSnapshot !== null &&
+      JSON.stringify({ formData, labels }) !== initialSnapshot,
+    [open, initialSnapshot, formData, labels],
+  );
+  useUnsavedChangesGuard(isDirty);
+  const confirmIfUnsaved = useConfirmIfUnsaved();
+  // Backdrop and header X discard edits, so confirm first; Cancel and the
+  // post-save close stay direct.
+  const handleGuardedClose = () => confirmIfUnsaved(onClose, isDirty);
 
   const handleFieldChange = useCallback((field: keyof EditAgentFormValues, value: string) => {
     const error = validateField(field, value);
@@ -134,11 +155,11 @@ export function EditAgentDrawer({ open, onClose, agent, orgId, projectId }: Edit
     !errors.displayName && !errors.description && formData.displayName.trim().length > 0;
 
   return (
-    <DrawerWrapper open={open} onClose={onClose} fullscreen={isFullscreen}>
+    <DrawerWrapper open={open} onClose={handleGuardedClose} fullscreen={isFullscreen}>
       <DrawerHeader
         icon={<Edit size={24} />}
         title="Edit Agent"
-        onClose={onClose}
+        onClose={handleGuardedClose}
         isFullscreen={isFullscreen}
         onToggleFullscreen={toggleFullscreen}
       />
@@ -150,6 +171,7 @@ export function EditAgentDrawer({ open, onClose, agent, orgId, projectId }: Edit
                 <Typography variant="h5">Agent Details</Typography>
                 <Box display="flex" flexDirection="column" gap={1}>
                   <TextInput
+                    maxLength={INPUT_LIMITS.NAME}
                     placeholder="e.g., Customer Support Agent"
                     label="Name"
                     fullWidth

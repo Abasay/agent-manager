@@ -1,0 +1,111 @@
+name: Deploy Pages Redirect
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/install-amctl.sh'
+      - '.github/workflows/pages-redirect.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  DOCS_URL: https://wso2.com/agent-platform/docs/
+
+jobs:
+  build:
+    name: Build redirect site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Syntax-check the installer
+        run: sh -n scripts/install-amctl.sh
+
+      - name: Assemble the redirect site
+        run: |
+          set -euo pipefail
+          mkdir -p site
+          cp scripts/install-amctl.sh site/install.sh
+
+          cat > site/index.html <<EOF
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <title>WSO2 Agent Manager documentation has moved</title>
+              <link rel="canonical" href="${DOCS_URL}" />
+              <meta http-equiv="refresh" content="0; url=${DOCS_URL}" />
+            </head>
+            <body>
+              <p>
+                The WSO2 Agent Manager documentation has moved to
+                <a href="${DOCS_URL}">${DOCS_URL}</a>.
+              </p>
+            </body>
+          </html>
+          EOF
+
+          #   /agent-manager/docs/v1.0.0/get-started/quick-start/
+          # maps to
+          #   <DOCS_URL>v1.0.0/get-started/quick-start/
+          # A bookmark therefore lands on the page it was saved for.
+          #
+          # Written with a quoted heredoc so the shell leaves the JavaScript
+          # alone - the regex contains $ and / sequences that an unquoted
+          # heredoc would try to interpret - with the URL substituted after.
+          cat > site/404.html <<'HTML'
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <title>WSO2 Agent Manager documentation has moved</title>
+              <script>
+                (function () {
+                  var base = '__DOCS_URL__';
+                  // Everything after /agent-manager/docs/ is unchanged on the new
+                  // site. Anything else (or the bare prefix) goes to the home page.
+                  var m = location.pathname.match(/^\/agent-manager\/docs\/(.*)$/);
+                  var rest = m && m[1] ? m[1] : '';
+                  location.replace(base + rest + location.search + location.hash);
+                })();
+              </script>
+              <meta http-equiv="refresh" content="3; url=__DOCS_URL__" />
+            </head>
+            <body>
+              <p>
+                The WSO2 Agent Manager documentation has moved to
+                <a href="__DOCS_URL__">__DOCS_URL__</a>.
+              </p>
+            </body>
+          </html>
+          HTML
+
+          # The meta refresh above is the no-JavaScript fallback and deliberately
+          # waits 3s, so it never beats the script to the more specific target.
+          sed -i "s|__DOCS_URL__|${DOCS_URL}|g" site/404.html
+
+          ls -la site
+
+      - name: Upload build artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

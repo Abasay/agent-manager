@@ -55,6 +55,7 @@ import {
 import {
   PermissionTree,
   type PermissionTreeItem,
+  useUnsavedChangesGuard,
 } from "@agent-management-platform/shared-component";
 import { BackButton } from "./components/BackButton";
 import { EditFormSkeleton } from "./components/EditFormSkeleton";
@@ -352,6 +353,13 @@ export const RoleEditPage: React.FC = () => {
     removedUserIds.size > 0 ||
     pendingGroupAdds.length > 0 ||
     removedGroupIds.size > 0;
+  const { allowNavigation } = useUnsavedChangesGuard(
+    (permissionsDirty && hasEditedPermissions.current) ||
+      pendingUserAdds.length > 0 ||
+      removedUserIds.size > 0 ||
+      pendingGroupAdds.length > 0 ||
+      removedGroupIds.size > 0,
+  );
 
   if (isLoading) {
     return (
@@ -555,7 +563,7 @@ export const RoleEditPage: React.FC = () => {
           <Stack direction="row" spacing={1}>
             <Button
               variant="outlined"
-              onClick={() => navigate(rolesPath)}
+              onClick={() => allowNavigation(() => navigate(rolesPath))}
               disabled={isSaving}
             >
               Cancel

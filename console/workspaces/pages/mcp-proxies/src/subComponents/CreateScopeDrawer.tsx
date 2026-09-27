@@ -38,15 +38,20 @@ import {
 } from "@agent-management-platform/views";
 import { useAuthHooks } from "@agent-management-platform/auth";
 import {
+  useConfirmIfUnsaved,
+  useUnsavedChangesGuard,
+} from "@agent-management-platform/shared-component";
+import {
   listAgentIdentityRoles,
   useCreateMCPProxyScope,
   useUpdateAgentIdentityRole,
 } from "@agent-management-platform/api-client";
-import type {
-  AgentIdentityRoleListResponse,
-  Environment,
-  MCPProxyScopeResponse,
-  ThunderRole,
+import {
+  type AgentIdentityRoleListResponse,
+  type Environment,
+  type MCPProxyScopeResponse,
+  type ThunderRole,
+  INPUT_LIMITS,
 } from "@agent-management-platform/types";
 import { z } from "zod";
 
@@ -141,6 +146,17 @@ export function CreateScopeDrawer({
     clearErrors();
     resetCreateScope();
   }, [open, clearErrors, resetCreateScope]);
+
+  const isDirty =
+    open &&
+    (JSON.stringify(formData) !== JSON.stringify(DEFAULT_FORM) ||
+      selectedTools.length > 0 ||
+      Object.values(selectedRolesByEnv).some((roles) => roles.length > 0));
+  useUnsavedChangesGuard(isDirty);
+  const confirmIfUnsaved = useConfirmIfUnsaved();
+  // Backdrop and header X discard edits, so confirm first; Cancel and the
+  // post-save close stay direct.
+  const handleGuardedClose = () => confirmIfUnsaved(onClose, isDirty);
 
   const roleQueries = useQueries({
     queries: environments.map(
@@ -266,8 +282,8 @@ export function CreateScopeDrawer({
   const isValid = !errors.name && formData.name.trim().length > 0;
 
   return (
-    <DrawerWrapper open={open} onClose={onClose}>
-      <DrawerHeader icon={<Plus size={24} />} title="Create Scope" onClose={onClose} />
+    <DrawerWrapper open={open} onClose={handleGuardedClose}>
+      <DrawerHeader icon={<Plus size={24} />} title="Create Scope" onClose={handleGuardedClose} />
       <DrawerContent>
         <form onSubmit={handleSubmit}>
           <Stack spacing={3}>
@@ -287,6 +303,7 @@ export function CreateScopeDrawer({
             <FormControl fullWidth error={Boolean(errors.name)}>
               <FormLabel required>Name</FormLabel>
               <TextField
+                slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.NAME } }}
                 fullWidth
                 size="small"
                 value={formData.name}
@@ -301,6 +318,7 @@ export function CreateScopeDrawer({
             <FormControl fullWidth error={Boolean(errors.description)}>
               <FormLabel>Description</FormLabel>
               <TextField
+                slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.DESCRIPTION } }}
                 fullWidth
                 size="small"
                 multiline

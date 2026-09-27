@@ -34,7 +34,11 @@ import {
   DrawerHeader,
   DrawerWrapper,
 } from "@agent-management-platform/views";
-import { getErrorMessage } from "@agent-management-platform/shared-component";
+import {
+  getErrorMessage,
+  useConfirmIfUnsaved,
+  useUnsavedChangesGuard,
+} from "@agent-management-platform/shared-component";
 import {
   Avatar,
   Box,
@@ -317,6 +321,30 @@ export function MonitorLLMProviderDrawer({
   // so it fires at most once per drawer-open and never overrides a user who
   // deliberately navigated back to the list.
   const autoSwitchDone = useRef(false);
+  const [isCreateFormDirty, setIsCreateFormDirty] = useState(false);
+  const isCreateDraftDirty = open && mode === "create" && isCreateFormDirty;
+  useUnsavedChangesGuard(isCreateDraftDirty);
+  const confirmIfUnsaved = useConfirmIfUnsaved();
+  // Only this drawer's own draft decides the prompt — a dirty monitor wizard
+  // behind it stays on screen, so it mustn't trigger a warning here.
+  const backToList = useCallback(
+    () =>
+      confirmIfUnsaved(() => {
+        setIsCreateFormDirty(false);
+        setMode("list");
+      }, isCreateDraftDirty),
+    [confirmIfUnsaved, isCreateDraftDirty],
+  );
+  // Header X, Escape and backdrop discard the create draft, so confirm first.
+  const handleDrawerClose = useCallback(
+    () => confirmIfUnsaved(onClose, isCreateDraftDirty),
+    [confirmIfUnsaved, onClose, isCreateDraftDirty],
+  );
+  // Cancel is an explicit discard, so it skips the unsaved-changes prompt.
+  const cancelCreate = useCallback(() => {
+    setIsCreateFormDirty(false);
+    setMode("list");
+  }, []);
   const {
     mutate: createLLMProvider,
     isPending: isCreatingProvider,
@@ -340,6 +368,7 @@ export function MonitorLLMProviderDrawer({
       setFetchOffset(0);
       setRefreshKey((k) => k + 1);
       setMode("list");
+      setIsCreateFormDirty(false);
       autoSwitchDone.current = false;
     }
   }, [open]);
@@ -425,11 +454,11 @@ export function MonitorLLMProviderDrawer({
   );
 
   return (
-    <DrawerWrapper open={open} onClose={onClose} maxWidth={520}>
+    <DrawerWrapper open={open} onClose={handleDrawerClose} maxWidth={520}>
       <DrawerHeader
         icon={<DoorClosedLocked size={24} />}
         title={mode === "create" ? "Create LLM Provider" : "Select LLM Provider"}
-        onClose={onClose}
+        onClose={handleDrawerClose}
       />
       <DrawerContent>
         {mode === "list" ? (
@@ -504,7 +533,7 @@ export function MonitorLLMProviderDrawer({
               variant="text"
               size="small"
               startIcon={<ArrowLeft size={16} />}
-              onClick={() => setMode("list")}
+              onClick={backToList}
               sx={{ alignSelf: "flex-start" }}
             >
               Back to providers
@@ -527,7 +556,8 @@ export function MonitorLLMProviderDrawer({
               submitLabel="Create & use provider"
               showAdvancedBasicDetails={false}
               showGuardrails={false}
-              onCancel={() => setMode("list")}
+              onCancel={cancelCreate}
+              onDirtyChange={setIsCreateFormDirty}
               onSubmit={handleCreateProvider}
             />
           </Stack>

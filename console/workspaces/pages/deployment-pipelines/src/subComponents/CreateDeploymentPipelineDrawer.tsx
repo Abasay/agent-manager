@@ -38,9 +38,14 @@ import {
   useCreateDeploymentPipeline,
   useListEnvironments,
 } from "@agent-management-platform/api-client";
-import { createPipelineSchema, type CreatePipelineFormValues } from "../form/schema";
+import {
+  useConfirmIfUnsaved,
+  useUnsavedChangesGuard,
+} from "@agent-management-platform/shared-component";
+import { createPipelineSchema, type CreatePipelineFormValues, PIPELINE_DISPLAY_NAME_MAX_LENGTH } from "../form/schema";
 import { chainToPromotionPaths } from "../utils/chainUtils";
 import { PipelineChainEditor } from "./PipelineChainEditor";
+import { INPUT_LIMITS } from "@agent-management-platform/types";
 
 interface CreateDeploymentPipelineDrawerProps {
   open: boolean;
@@ -78,6 +83,18 @@ export function CreateDeploymentPipelineDrawer(
       resetMutation();
     }
   }, [open, resetMutation]);
+
+  const isDirty = open && JSON.stringify(formData) !== JSON.stringify(DEFAULT_FORM);
+
+  useUnsavedChangesGuard(isDirty);
+
+  const confirmIfUnsaved = useConfirmIfUnsaved();
+
+  // Backdrop and header X discard edits, so confirm first; Cancel and the
+
+  // post-save close stay direct.
+
+  const handleGuardedClose = () => confirmIfUnsaved(onClose, isDirty);
 
   const handleFieldChange = useCallback(
     (field: "displayName" | "description", value: string) => {
@@ -121,8 +138,8 @@ export function CreateDeploymentPipelineDrawer(
   );
 
   return (
-    <DrawerWrapper open={open} onClose={onClose}>
-      <DrawerHeader icon={<GitBranch size={24} />} title="Create Deployment Pipeline" onClose={onClose} />
+    <DrawerWrapper open={open} onClose={handleGuardedClose}>
+      <DrawerHeader icon={<GitBranch size={24} />} title="Create Deployment Pipeline" onClose={handleGuardedClose} />
       <DrawerContent>
         <form onSubmit={handleSubmit}>
           <Stack spacing={3}>
@@ -138,6 +155,7 @@ export function CreateDeploymentPipelineDrawer(
                 <FormControl fullWidth error={Boolean(errors.displayName)}>
                   <FormLabel required>Display Name</FormLabel>
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: PIPELINE_DISPLAY_NAME_MAX_LENGTH } }}
                     fullWidth
                     size="small"
                     value={formData.displayName}
@@ -152,6 +170,7 @@ export function CreateDeploymentPipelineDrawer(
                 <FormControl fullWidth>
                   <FormLabel>Description</FormLabel>
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.DESCRIPTION } }}
                     fullWidth
                     size="small"
                     multiline

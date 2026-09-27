@@ -16,9 +16,10 @@
  * under the License.
  */
 
-import type {
-  EvaluatorConfigParam,
-  EvaluatorResponse,
+import {
+  type EvaluatorConfigParam,
+  type EvaluatorResponse,
+  INPUT_LIMITS,
 } from "@agent-management-platform/types";
 import {
   DrawerWrapper,
@@ -41,7 +42,10 @@ import {
 } from "@wso2/oxygen-ui";
 import { Plus, Trash, Book } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useConfirmationDialog } from "@agent-management-platform/shared-component";
+import {
+  useConfirmationDialog,
+  useUnsavedChangesGuard,
+} from "@agent-management-platform/shared-component";
 
 interface EvaluatorDetailsDrawerProps {
   evaluator: EvaluatorResponse | null;
@@ -297,6 +301,7 @@ function ConfigParamField({
               alignItems="center"
             >
               <TextField
+                slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.VALUE } }}
                 fullWidth
                 value={entryValue}
                 placeholder={`Value ${index + 1}`}
@@ -360,6 +365,7 @@ function ConfigParamField({
     return (
       <Form.ElementWrapper label={labelWithRequired} name={key}>
         <TextField
+          slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.VALUE } }}
           value={textValue}
           required={required}
           error={!!error}
@@ -460,6 +466,7 @@ export function EvaluatorDetailsDrawer({
     () => JSON.stringify(configValues) !== JSON.stringify(savedConfig),
     [configValues, savedConfig],
   );
+  useUnsavedChangesGuard(open && isDirty);
 
   const handleRequestClose = useCallback(() => {
     if (!isDirty) {

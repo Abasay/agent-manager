@@ -28,6 +28,7 @@ import {
   PolicyListSection,
   ResilienceTimeoutFields,
   usePipelineEnvironmentsState,
+  useUnsavedChangesGuard,
   type PolicySelection as GuardrailSelection,
 } from "@agent-management-platform/shared-component";
 import {
@@ -546,6 +547,8 @@ export const ViewLLMProviderComponent: React.FC = () => {
     }));
   }, [selectedEnvName, resilienceByEnv]);
 
+  const { allowNavigation } = useUnsavedChangesGuard(isDirty);
+
   const handleSave = useCallback(() => {
     if (!orgId || !projectId || !agentId || !configId || !config) return;
 
@@ -954,7 +957,10 @@ export const ViewLLMProviderComponent: React.FC = () => {
       <EnvironmentVariablesGuideDrawer
         open={panelOpen}
         onClose={() => setPanelOpen(false)}
-        onCancel={() => { setPanelOpen(false); navigate(backHref); }}
+        onCancel={() => {
+          setPanelOpen(false);
+          allowNavigation(() => navigate(backHref));
+        }}
         onSave={handleSave}
         isDirty={isDirty}
         isSaving={updateConfig.isPending}
@@ -1196,7 +1202,7 @@ export const ViewLLMProviderComponent: React.FC = () => {
                   size="small"
                   onClick={() => {
                     setPendingProviderByEnv({});
-                    navigate(backHref);
+                    allowNavigation(() => navigate(backHref));
                   }}
                 >
                   Cancel

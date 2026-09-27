@@ -38,8 +38,16 @@ import {
   useFormValidation,
 } from "@agent-management-platform/views";
 import { useUpdateEnvironment } from "@agent-management-platform/api-client";
-import type { Environment } from "@agent-management-platform/types";
-import { editEnvironmentSchema, type EditEnvironmentFormValues } from "../form/environmentSchema";
+import {
+  useConfirmIfUnsaved,
+  useUnsavedChangesGuard,
+} from "@agent-management-platform/shared-component";
+import { type Environment, INPUT_LIMITS } from "@agent-management-platform/types";
+import {
+  editEnvironmentSchema,
+  ENVIRONMENT_DISPLAY_NAME_MAX_LENGTH,
+  type EditEnvironmentFormValues,
+} from "../form/environmentSchema";
 
 interface EditEnvironmentDrawerProps {
   open: boolean;
@@ -59,6 +67,7 @@ export function EditEnvironmentDrawer({
     description: "",
     isProduction: environment.isProduction,
   });
+  const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
 
   const { errors, validateForm, setFieldError, validateField } =
     useFormValidation<EditEnvironmentFormValues>(editEnvironmentSchema);
@@ -75,15 +84,27 @@ export function EditEnvironmentDrawer({
 
   useEffect(() => {
     if (open) {
-      setFormData({
+      const seed = {
         displayName: environment.displayName ?? "",
         description: "",
         isProduction: environment.isProduction,
-      });
+      };
+      setFormData(seed);
+      setInitialSnapshot(JSON.stringify(seed));
       setLastSubmittedValidationErrors({});
       resetMutation();
     }
   }, [open, environment, resetMutation]);
+
+  const isDirty = useMemo(
+    () => open && initialSnapshot !== null && JSON.stringify(formData) !== initialSnapshot,
+    [open, initialSnapshot, formData],
+  );
+  useUnsavedChangesGuard(isDirty);
+  const confirmIfUnsaved = useConfirmIfUnsaved();
+  // Backdrop and header X discard edits, so confirm first; Cancel and the
+  // post-save close stay direct.
+  const handleGuardedClose = () => confirmIfUnsaved(onClose, isDirty);
 
   const handleFieldChange = useCallback(
     (field: keyof EditEnvironmentFormValues, value: string | boolean) => {
@@ -141,8 +162,8 @@ export function EditEnvironmentDrawer({
   const validationErrorsList = Object.values(lastSubmittedValidationErrors).filter(Boolean);
 
   return (
-    <DrawerWrapper open={open} onClose={onClose}>
-      <DrawerHeader icon={<Edit size={24} />} title="Edit Environment" onClose={onClose} />
+    <DrawerWrapper open={open} onClose={handleGuardedClose}>
+      <DrawerHeader icon={<Edit size={24} />} title="Edit Environment" onClose={handleGuardedClose} />
       <DrawerContent>
         <form onSubmit={handleSubmit}>
           <Stack spacing={3}>
@@ -166,6 +187,7 @@ export function EditEnvironmentDrawer({
                 <FormControl fullWidth error={Boolean(errors.displayName)}>
                   <FormLabel required>Display Name</FormLabel>
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: ENVIRONMENT_DISPLAY_NAME_MAX_LENGTH } }}
                     fullWidth
                     size="small"
                     value={formData.displayName}
@@ -179,6 +201,7 @@ export function EditEnvironmentDrawer({
                 <FormControl fullWidth>
                   <FormLabel>Description</FormLabel>
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.DESCRIPTION } }}
                     fullWidth
                     size="small"
                     multiline

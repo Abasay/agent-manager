@@ -69,6 +69,7 @@ import {
   useAgentRolesAndGroups,
   usePipelineEnvironmentsState,
   useThunderInstanceForEnv,
+  useUnsavedChangesGuard,
 } from "@agent-management-platform/shared-component";
 import { useAssignmentDelta } from "../subComponents/agentIdentity/useAssignmentDelta";
 
@@ -324,6 +325,7 @@ const AgentIdentitySection: React.FC<AgentIdentitySectionProps> = ({
 
   const canEditAssignments = !!thunderAgentId && provisioned;
   const isDirty = roleDelta.isDirty || groupDelta.isDirty;
+  useUnsavedChangesGuard(isDirty);
 
   const handleCancelChanges = () => {
     roleDelta.reset();

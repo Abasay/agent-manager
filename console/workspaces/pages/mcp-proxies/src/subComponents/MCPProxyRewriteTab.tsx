@@ -43,12 +43,14 @@ import {
 } from "@wso2/oxygen-ui";
 import { ChevronDown } from "@wso2/oxygen-ui-icons-react";
 import { useMCPPoliciesCatalog } from "@agent-management-platform/api-client";
-import type {
-  MCPEndpointConfig,
-  MCPProxy,
-  MCPProxyPolicy,
+import {
+  type MCPEndpointConfig,
+  type MCPProxy,
+  type MCPProxyPolicy,
+  INPUT_LIMITS,
 } from "@agent-management-platform/types";
 import { TextInput } from "@agent-management-platform/views";
+import { useUnsavedChangesGuard } from "@agent-management-platform/shared-component";
 import { REWRITE_POLICY_NAME } from "../constants";
 import type { CapabilityKind } from "./mcpEndpoints";
 
@@ -420,6 +422,9 @@ export function MCPProxyRewriteTab({
 
   const hasAnyCapability = meta.length > 0;
 
+  // lastSavedRef is a ref, so a save bumps this to recompute isDirty at once
+  // (otherwise the unsaved-changes guard stays armed until a refetch).
+  const [savedVersion, setSavedVersion] = useState(0);
   const isDirty = useMemo(() => {
     const saved = lastSavedRef.current;
     if (!saved) return false;
@@ -427,8 +432,10 @@ export function MCPProxyRewriteTab({
     // When disabled, only the toggle matters; field edits are ignored.
     if (!enabled) return false;
     return JSON.stringify(saved.state) !== JSON.stringify(state);
-  }, [enabled, state]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- savedVersion marks a ref update
+  }, [enabled, state, savedVersion]);
 
+  useUnsavedChangesGuard(isDirty);
   const updateTool = useCallback(
     (backendId: string, patch: Partial<ToolEntry>) => {
       setState((prev) => ({
@@ -507,6 +514,7 @@ export function MCPProxyRewriteTab({
     try {
       await onUpdate({ policies: nextPolicies });
       lastSavedRef.current = { enabled, state };
+      setSavedVersion((v) => v + 1);
       setStatus({
         message: enabled
           ? "Rewrite policy updated successfully."
@@ -784,6 +792,7 @@ function RewriteFieldsForm({
       {meta.kind === "tool" && (
         <>
           <TextInput
+            maxLength={INPUT_LIMITS.NAME}
             label="Name"
             size="small"
             fullWidth
@@ -793,6 +802,7 @@ function RewriteFieldsForm({
             }
           />
           <TextInput
+            maxLength={INPUT_LIMITS.DESCRIPTION}
             label="Description"
             size="small"
             fullWidth
@@ -804,6 +814,7 @@ function RewriteFieldsForm({
             }
           />
           <TextInput
+            maxLength={INPUT_LIMITS.SOURCE}
             label="Input Schema"
             size="small"
             fullWidth
@@ -830,6 +841,7 @@ function RewriteFieldsForm({
             <AccordionDetails>
               <Stack spacing={2}>
                 <TextInput
+                  maxLength={INPUT_LIMITS.SOURCE}
                   label="Output Schema"
                   size="small"
                   fullWidth
@@ -846,6 +858,7 @@ function RewriteFieldsForm({
                   }}
                 />
                 <TextInput
+                  maxLength={INPUT_LIMITS.SHORT_TEXT}
                   label="Target"
                   size="small"
                   fullWidth
@@ -868,6 +881,7 @@ function RewriteFieldsForm({
       {meta.kind === "resource" && (
         <>
           <TextInput
+            maxLength={INPUT_LIMITS.URL}
             label="URI"
             size="small"
             fullWidth
@@ -878,6 +892,7 @@ function RewriteFieldsForm({
             sx={{ "& .MuiInputBase-input": { fontFamily: "monospace" } }}
           />
           <TextInput
+            maxLength={INPUT_LIMITS.DESCRIPTION}
             label="Description"
             size="small"
             fullWidth
@@ -902,6 +917,7 @@ function RewriteFieldsForm({
             <AccordionDetails>
               <Stack spacing={2}>
                 <TextInput
+                  maxLength={INPUT_LIMITS.SHORT_TEXT}
                   label="Target"
                   size="small"
                   fullWidth
@@ -925,6 +941,7 @@ function RewriteFieldsForm({
       {meta.kind === "prompt" && (
         <>
           <TextInput
+            maxLength={INPUT_LIMITS.NAME}
             label="Name"
             size="small"
             fullWidth
@@ -934,6 +951,7 @@ function RewriteFieldsForm({
             }
           />
           <TextInput
+            maxLength={INPUT_LIMITS.DESCRIPTION}
             label="Description"
             size="small"
             fullWidth
@@ -958,6 +976,7 @@ function RewriteFieldsForm({
             <AccordionDetails>
               <Stack spacing={2}>
                 <TextInput
+                  maxLength={INPUT_LIMITS.SHORT_TEXT}
                   label="Target"
                   size="small"
                   fullWidth

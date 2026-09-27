@@ -24,6 +24,7 @@ import {
 import {
   absoluteRouteMap,
   type MCPProxy,
+  INPUT_LIMITS,
 } from "@agent-management-platform/types";
 import {
   Button,
@@ -36,6 +37,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { useFormValidation } from "@agent-management-platform/views";
+import { useUnsavedChangesGuard } from "@agent-management-platform/shared-component";
 import { z } from "zod";
 import { type EndpointDraft } from "./EndpointFormFields";
 import { EndpointsEditorSection } from "./EndpointsEditorSection";
@@ -95,6 +97,15 @@ export function AddMCPProxyForm({ onCancel }: AddMCPProxyFormProps) {
       : undefined;
 
   const isCreating = createMCPProxy.isPending;
+
+  const isDirty =
+    Boolean(proxyName) ||
+    proxyVersion !== DEFAULT_PROXY_VERSION ||
+    Boolean(proxyDescription) ||
+    Boolean(proxyContext) ||
+    Boolean(handle) ||
+    endpoints.length > 0;
+  const { allowNavigation } = useUnsavedChangesGuard(isDirty);
 
   const handleVersionChange = useCallback(
     (value: string) => {
@@ -168,12 +179,15 @@ export function AddMCPProxyForm({ onCancel }: AddMCPProxyFormProps) {
     };
 
     await createMCPProxy.mutateAsync({ params: { orgName: orgId }, body });
-    navigate(
-      generatePath(absoluteRouteMap.children.org.children.mcpProxies.path, {
-        orgId,
-      }),
+    allowNavigation(() =>
+      navigate(
+        generatePath(absoluteRouteMap.children.org.children.mcpProxies.path, {
+          orgId,
+        }),
+      ),
     );
   }, [
+    allowNavigation,
     createMCPProxy,
     endpoints,
     navigate,
@@ -207,6 +221,7 @@ export function AddMCPProxyForm({ onCancel }: AddMCPProxyFormProps) {
             <FormControl sx={{ flex: 1 }}>
               <FormLabel required>Name</FormLabel>
               <TextField
+                slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.NAME } }}
                 fullWidth
                 value={proxyName}
                 onChange={(event) => handleNameChange(event.target.value)}
@@ -218,6 +233,7 @@ export function AddMCPProxyForm({ onCancel }: AddMCPProxyFormProps) {
             >
               <FormLabel required>Version</FormLabel>
               <TextField
+                slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.SHORT_TEXT } }}
                 fullWidth
                 value={proxyVersion}
                 onChange={(event) => handleVersionChange(event.target.value)}
@@ -230,6 +246,7 @@ export function AddMCPProxyForm({ onCancel }: AddMCPProxyFormProps) {
           <FormControl fullWidth error={Boolean(handleLengthError)}>
             <FormLabel required>Handle</FormLabel>
             <TextField
+              slotProps={{ htmlInput: { maxLength: MAX_HANDLE_LENGTH } }}
               fullWidth
               value={handle}
               onChange={(event) => handleHandleChange(event.target.value)}
@@ -247,6 +264,7 @@ export function AddMCPProxyForm({ onCancel }: AddMCPProxyFormProps) {
           <FormControl fullWidth>
             <FormLabel>Description</FormLabel>
             <TextField
+              slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.DESCRIPTION } }}
               fullWidth
               multiline
               minRows={3}
@@ -259,6 +277,7 @@ export function AddMCPProxyForm({ onCancel }: AddMCPProxyFormProps) {
           <FormControl fullWidth>
             <FormLabel>Context</FormLabel>
             <TextField
+              slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.PATH } }}
               fullWidth
               value={proxyContext}
               onChange={(event) => setProxyContext(event.target.value)}
@@ -293,7 +312,7 @@ export function AddMCPProxyForm({ onCancel }: AddMCPProxyFormProps) {
 
       {addOpen || editingId !== null ? null : (
         <Stack direction="row" spacing={1}>
-          <Button variant="outlined" onClick={onCancel}>
+          <Button variant="outlined" onClick={() => allowNavigation(onCancel)}>
             Cancel
           </Button>
           <Button

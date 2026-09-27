@@ -120,19 +120,6 @@ export const SecurityComponent: React.FC = () => {
         illustration: <KeyRound size={48} />,
         title: "This agent uses OAuth",
         description: "Manage OAuth authentication from the configured identity provider.",
-        action: orgId && envId ? (
-          <Button
-            variant="outlined"
-            component={Link}
-            to={generatePath(
-              absoluteRouteMap.children.org.children.environments.children.view.children
-                .identityProvider.path,
-              { orgId, envName: envId },
-            )}
-          >
-            View Identity Provider
-          </Button>
-        ) : undefined,
       }
     : !securityEnabled
     ? {

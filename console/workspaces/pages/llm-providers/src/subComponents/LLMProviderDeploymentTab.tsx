@@ -24,6 +24,7 @@ import type {
 import {
   EnvironmentGatewaySelector,
   useConfirmationDialog,
+  useUnsavedChangesGuard,
 } from "@agent-management-platform/shared-component";
 import { Alert, Button, Collapse, Skeleton, Stack } from "@wso2/oxygen-ui";
 
@@ -113,6 +114,8 @@ export function LLMProviderDeploymentTab({
       setStatus({ message: "Failed to update deployment.", severity: "error" });
     }
   }, [onUpdate, selectedGatewayIds]);
+
+  useUnsavedChangesGuard(isDirty);
 
   const handleSave = useCallback(() => {
     if (!providerData) return;

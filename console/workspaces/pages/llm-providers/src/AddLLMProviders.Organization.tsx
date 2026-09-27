@@ -16,10 +16,13 @@
  * under the License.
  */
 
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { PageLayout } from "@agent-management-platform/views";
 import { generatePath, useNavigate, useParams } from "react-router-dom";
-import { getErrorMessage } from "@agent-management-platform/shared-component";
+import {
+  getErrorMessage,
+  useUnsavedChangesGuard,
+} from "@agent-management-platform/shared-component";
 import { absoluteRouteMap } from "@agent-management-platform/types";
 import {
   useCreateLLMProvider,
@@ -39,6 +42,8 @@ import {
 export const AddLLMProvidersOrganization: React.FC = () => {
   const { orgId } = useParams<{ orgId: string }>();
   const navigate = useNavigate();
+  const [isDirty, setIsDirty] = useState(false);
+  const { allowNavigation } = useUnsavedChangesGuard(isDirty);
 
   const backHref = useMemo(
     () =>
@@ -113,12 +118,12 @@ export const AddLLMProvidersOrganization: React.FC = () => {
                 .path,
               { orgId, providerId: data.uuid },
             );
-            navigate(viewPath);
+            allowNavigation(() => navigate(viewPath));
           },
         },
       );
     },
-    [createLLMProvider, navigate, orgId, templates],
+    [createLLMProvider, navigate, allowNavigation, orgId, templates],
   );
 
   return (
@@ -135,7 +140,8 @@ export const AddLLMProvidersOrganization: React.FC = () => {
         missingParamsMessage={missingParamsMessage}
         errorMessage={combinedErrorMessage}
         isSubmitting={isCreating}
-        onCancel={() => navigate(backHref)}
+        onCancel={() => allowNavigation(() => navigate(backHref))}
+        onDirtyChange={setIsDirty}
         onSubmit={handleSubmit}
       />
     </PageLayout>

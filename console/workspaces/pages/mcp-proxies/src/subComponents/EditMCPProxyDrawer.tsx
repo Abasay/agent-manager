@@ -35,7 +35,11 @@ import {
   useFormValidation,
 } from "@agent-management-platform/views";
 import { useUpdateMCPProxy } from "@agent-management-platform/api-client";
-import type { Environment, MCPProxy } from "@agent-management-platform/types";
+import {
+  useConfirmIfUnsaved,
+  useUnsavedChangesGuard,
+} from "@agent-management-platform/shared-component";
+import { type Environment, type MCPProxy, INPUT_LIMITS } from "@agent-management-platform/types";
 import { z } from "zod";
 import { type EndpointDraft } from "./EndpointFormFields";
 import { EndpointsEditorSection } from "./EndpointsEditorSection";
@@ -92,6 +96,21 @@ export function EditMCPProxyDrawer({
   const [addOpen, setAddOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  const [seededSnapshot, setSeededSnapshot] = useState<string | null>(null);
+  // An endpoint being added/edited inline isn't in `endpoints` until the user
+  // applies it, so its form reports its own dirty state.
+  const [isEndpointFormDirty, setIsEndpointFormDirty] = useState(false);
+  const isDirty =
+    open &&
+    (isEndpointFormDirty ||
+      (seededSnapshot !== null &&
+        JSON.stringify({ formData, endpoints }) !== seededSnapshot));
+  useUnsavedChangesGuard(isDirty);
+  const confirmIfUnsaved = useConfirmIfUnsaved();
+  // Backdrop and header X discard edits, so confirm first; Cancel and the
+  // post-save close stay direct.
+  const handleGuardedClose = () => confirmIfUnsaved(onClose, isDirty);
+
   const wasOpenRef = useRef(false);
 
   useEffect(() => {
@@ -102,18 +121,23 @@ export function EditMCPProxyDrawer({
     // would clobber whatever the user is mid-editing.
     if (!justOpened) return;
 
-    setFormData({
+    const seededFormData = {
       name: proxy.name,
       version: proxy.version,
       context: proxy.context ?? "",
       description: proxy.description ?? "",
-    });
+    };
+    const seededEndpoints = (proxy.endpoints ?? []).map(endpointToDraft);
+    setFormData(seededFormData);
+    setSeededSnapshot(
+      JSON.stringify({ formData: seededFormData, endpoints: seededEndpoints }),
+    );
     clearErrors();
     resetMutation();
 
     // Seed the working list from the proxy's native endpoints each time the drawer is
     // opened. A draft seeded from a backend endpoint keeps its handle as its id.
-    setEndpoints((proxy.endpoints ?? []).map(endpointToDraft));
+    setEndpoints(seededEndpoints);
     setAddOpen(false);
     setEditingId(null);
   }, [proxy, open, clearErrors, resetMutation]);
@@ -180,11 +204,11 @@ export function EditMCPProxyDrawer({
     formData.version.trim().length > 0;
 
   return (
-    <DrawerWrapper open={open} onClose={onClose}>
+    <DrawerWrapper open={open} onClose={handleGuardedClose}>
       <DrawerHeader
         icon={<Edit size={24} />}
         title="Edit MCP Server"
-        onClose={onClose}
+        onClose={handleGuardedClose}
       />
       <DrawerContent>
         <form onSubmit={handleSubmit}>
@@ -209,6 +233,7 @@ export function EditMCPProxyDrawer({
                 <FormControl fullWidth error={Boolean(errors.name)}>
                   <FormLabel required>Name</FormLabel>
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.NAME } }}
                     fullWidth
                     size="small"
                     value={formData.name}
@@ -221,6 +246,7 @@ export function EditMCPProxyDrawer({
                 <FormControl fullWidth error={Boolean(errors.version)}>
                   <FormLabel required>Version</FormLabel>
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.SHORT_TEXT } }}
                     fullWidth
                     size="small"
                     value={formData.version}
@@ -235,6 +261,7 @@ export function EditMCPProxyDrawer({
                 <FormControl fullWidth error={Boolean(errors.context)}>
                   <FormLabel>Context</FormLabel>
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.PATH } }}
                     fullWidth
                     size="small"
                     placeholder="/default/my-mcp-proxy"
@@ -250,6 +277,7 @@ export function EditMCPProxyDrawer({
                 <FormControl fullWidth error={Boolean(errors.description)}>
                   <FormLabel>Description</FormLabel>
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.DESCRIPTION } }}
                     fullWidth
                     size="small"
                     multiline
@@ -285,6 +313,7 @@ export function EditMCPProxyDrawer({
                   editingId={editingId}
                   onEditingIdChange={setEditingId}
                   emptyStateText="No endpoints configured yet."
+                  onEndpointFormDirtyChange={setIsEndpointFormDirty}
                 />
               </Form.Stack>
             </Form.Section>

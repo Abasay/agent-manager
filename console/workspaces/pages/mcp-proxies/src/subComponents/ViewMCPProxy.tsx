@@ -20,6 +20,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -39,6 +40,11 @@ import {
   Button,
   Card,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   Divider,
   FormControl,
   Grid,
@@ -53,7 +59,12 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { AlertTriangle, Copy, Edit } from "@wso2/oxygen-ui-icons-react";
-import { generatePath, useParams, useSearchParams } from "react-router-dom";
+import {
+  generatePath,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { normalizeVersion } from "@agent-management-platform/shared-component";
 import {
   CreatedMetadata,
@@ -94,6 +105,106 @@ export function ViewMCPProxy() {
   const activeTabSlug = TAB_DEFS[tabIndex]?.slug;
   const selectedEndpointId = searchParams.get("endpoint") ?? "";
 
+  const navigate = useNavigate();
+
+  // Unsaved edits reported by the Security tab. While set, switching tabs,
+  // endpoints or pages first asks the user to confirm leaving.
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null);
+  // Lets the confirmed navigation through the history patch below.
+  const bypassGuardRef = useRef(false);
+
+  const guardUnsaved = useCallback(
+    (action: () => void) => {
+      if (hasUnsavedChanges) {
+        setPendingLeave(() => action);
+        return;
+      }
+      action();
+    },
+    [hasUnsavedChanges],
+  );
+
+  const handleStay = useCallback(() => setPendingLeave(null), []);
+
+  const handleLeave = useCallback(() => {
+    const action = pendingLeave;
+    setPendingLeave(null);
+    setHasUnsavedChanges(false);
+    bypassGuardRef.current = true;
+    try {
+      action?.();
+    } finally {
+      bypassGuardRef.current = false;
+    }
+  }, [pendingLeave]);
+
+  // BrowserRouter has no useBlocker, so intercept in-app navigation to other
+  // pages (sidebar, breadcrumbs, links) at the History API. Same-path changes
+  // are skipped: tab and endpoint switches only touch the query string and are
+  // guarded explicitly where they happen.
+  //
+  // Back/Forward fire popstate, which can't be cancelled. So while dirty, a
+  // duplicate entry for this same URL is pushed on top: Back lands on the
+  // original entry, the route doesn't change, and the dialog asks first.
+  useEffect(() => {
+    if (!hasUnsavedChanges) return undefined;
+    const { history } = window;
+    const originalPush = history.pushState.bind(history);
+    const originalReplace = history.replaceState.bind(history);
+    const isSentinel = () =>
+      (history.state as { unsavedGuard?: boolean } | null)?.unsavedGuard === true;
+    const pushSentinel = () =>
+      originalPush({ ...(history.state ?? {}), unsavedGuard: true }, "");
+    let leaving = false;
+
+    if (!isSentinel()) pushSentinel();
+
+    const intercept =
+      (original: History["pushState"], replace: boolean): History["pushState"] =>
+      (data, unused, url) => {
+        if (bypassGuardRef.current || url == null) {
+          original(data, unused, url);
+          return;
+        }
+        const target = new URL(String(url), window.location.href);
+        if (target.pathname === window.location.pathname) {
+          original(data, unused, url);
+          return;
+        }
+        const state = (data as { usr?: unknown } | null)?.usr;
+        setPendingLeave(() => () => {
+          leaving = true;
+          // Replace the sentinel so it doesn't linger as a stray history entry.
+          navigate(`${target.pathname}${target.search}${target.hash}`, {
+            replace: replace || isSentinel(),
+            state,
+          });
+        });
+      };
+
+    const handlePopState = () => {
+      if (leaving) return;
+      pushSentinel();
+      setPendingLeave(() => () => {
+        leaving = true;
+        // Step past this page's own entry, which sits under the sentinel.
+        history.go(-2);
+      });
+    };
+
+    history.pushState = intercept(originalPush, false);
+    history.replaceState = intercept(originalReplace, true);
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      history.pushState = originalPush;
+      history.replaceState = originalReplace;
+      window.removeEventListener("popstate", handlePopState);
+      // Saved or discarded in place: drop the sentinel so Back works normally.
+      if (!leaving && isSentinel()) history.back();
+    };
+  }, [hasUnsavedChanges, navigate]);
+
   const setSelectedEndpointId = useCallback(
     (endpointId: string) => {
       setSearchParams(
@@ -110,16 +221,18 @@ export function ViewMCPProxy() {
 
   const handleTabChange = useCallback(
     (_event: SyntheticEvent, value: number) => {
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          next.set("tab", TAB_DEFS[value].slug);
-          return next;
-        },
-        { replace: true },
+      guardUnsaved(() =>
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.set("tab", TAB_DEFS[value].slug);
+            return next;
+          },
+          { replace: true },
+        ),
       );
     },
-    [setSearchParams],
+    [guardUnsaved, setSearchParams],
   );
 
   const [editDrawerOpen, setEditDrawerOpen] = useState(false);
@@ -374,9 +487,10 @@ export function ViewMCPProxy() {
                 <FormControl size="small" sx={{ minWidth: 260 }}>
                   <Select
                     value={selectedEndpointId}
-                    onChange={(event) =>
-                      setSelectedEndpointId(event.target.value as string)
-                    }
+                    onChange={(event) => {
+                      const endpointId = event.target.value as string;
+                      guardUnsaved(() => setSelectedEndpointId(endpointId));
+                    }}
                     renderValue={(value) => {
                       const option = endpointOptions.find(
                         (o) => o.id === value,
@@ -461,6 +575,7 @@ export function ViewMCPProxy() {
                       isLoading={isTabContentLoading}
                       onUpdate={updateSelectedEndpointConfig}
                       isUpdating={updateMCPProxy.isPending}
+                      onDirtyChange={setHasUnsavedChanges}
                     />
                   )}
                   {activeTabSlug === "rewrite" && (
@@ -505,6 +620,22 @@ export function ViewMCPProxy() {
           environments={environments}
         />
       )}
+
+      <Dialog open={pendingLeave !== null} onClose={handleStay}>
+        <DialogTitle>You have unsaved changes</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Your changes on the Security tab haven&apos;t been saved. If you
+            leave now, they will be lost.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleStay}>Stay</Button>
+          <Button variant="contained" color="error" onClick={handleLeave}>
+            Leave
+          </Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 }

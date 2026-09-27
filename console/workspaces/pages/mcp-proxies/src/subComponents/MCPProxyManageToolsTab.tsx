@@ -21,6 +21,7 @@ import {
   type AccessControlItem,
   type AccessControlMode,
   type AccessControlStatus,
+  useUnsavedChangesGuard,
 } from "@agent-management-platform/shared-component";
 import { useMCPPoliciesCatalog } from "@agent-management-platform/api-client";
 import type {
@@ -203,14 +204,19 @@ export function MCPProxyManageToolsTab({
     lastSavedRef.current = parsed;
   }, [config, selectedEndpointId]);
 
+  // lastSavedRef is a ref, so a save bumps this to recompute isDirty at once
+  // (otherwise the unsaved-changes guard stays armed until a refetch).
+  const [savedVersion, setSavedVersion] = useState(0);
   const isDirty = useMemo(() => {
     const saved = lastSavedRef.current;
     if (!saved) return false;
     const currentKeys = [...exceptionKeys].sort().join(" ");
     const savedKeys = [...saved.exceptionKeys].sort().join(" ");
     return mode !== saved.mode || currentKeys !== savedKeys;
-  }, [mode, exceptionKeys]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- savedVersion marks a ref update
+  }, [mode, exceptionKeys, savedVersion]);
 
+  useUnsavedChangesGuard(isDirty);
   const handleSave = useCallback(async () => {
     if (!config) return;
     if (!availableAclPolicy) {
@@ -252,6 +258,7 @@ export function MCPProxyManageToolsTab({
     try {
       await onUpdate({ policies: nextPolicies });
       lastSavedRef.current = { mode, exceptionKeys: [...exceptionKeys] };
+      setSavedVersion((v) => v + 1);
       setStatus({
         message: "Access control updated successfully.",
         severity: "success",

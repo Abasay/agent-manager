@@ -33,7 +33,9 @@ import {
   resolveAuthenticationType,
   useAgentIdentityCredentials,
   usePipelineEnvironmentsState,
+  useConfirmIfUnsaved,
   useThunderInstanceForEnv,
+  useUnsavedChangesGuard,
 } from "@agent-management-platform/shared-component";
 import {
   Alert,
@@ -549,6 +551,9 @@ export const ViewMCPServerComponent = () => {
     (envVar) => (envVarNames[envVar.key] ?? envVar.name) !== envVar.name,
   );
 
+  useUnsavedChangesGuard(panelOpen && isDirty);
+  const confirmIfUnsaved = useConfirmIfUnsaved();
+
   const handleSave = () => {
     if (
       !orgId ||
@@ -871,7 +876,14 @@ export const ViewMCPServerComponent = () => {
     ) : (
       <EnvironmentVariablesGuideDrawer
         open={panelOpen}
-        onClose={() => setPanelOpen(false)}
+        // Closing discards the renamed variables (rather than hiding them from
+        // the guard while they sit in state), so confirm first when dirty.
+        onClose={() =>
+          confirmIfUnsaved(() => {
+            resetEnvVarNames();
+            setPanelOpen(false);
+          }, isDirty)
+        }
         onCancel={() => {
           resetEnvVarNames();
           setPanelOpen(false);

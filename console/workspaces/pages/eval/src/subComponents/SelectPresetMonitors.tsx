@@ -51,9 +51,9 @@ import {
 } from "@agent-management-platform/types";
 import {
   useGetEvaluator,
+  useGetLLMProvider,
   useListCatalogLLMProviders,
   useListEvaluators,
-  useListLLMProviders,
   useListLLMProviderTemplates,
 } from "@agent-management-platform/api-client";
 import { generatePath, useParams } from "react-router-dom";
@@ -158,16 +158,12 @@ export function SelectPresetMonitors({
 
   const selectedProviderName = llmProvider?.providerName;
 
-  const { data: providersData } = useListLLMProviders({ orgName: orgId });
-  const selectedProviderTemplate = providersData?.providers.find(
-    (provider) => provider.id === selectedProviderName,
-  )?.template;
-  const providerDisplayName = useMemo(
-    () =>
-      providersData?.providers.find((p) => p.id === selectedProviderName)
-        ?.name ?? selectedProviderName,
-    [providersData, selectedProviderName],
-  );
+  const { data: selectedProvider } = useGetLLMProvider({
+    orgName: orgId,
+    providerId: selectedProviderName,
+  });
+  const selectedProviderTemplate = selectedProvider?.template;
+  const providerDisplayName = selectedProvider?.name ?? selectedProviderName;
 
   const { data: catalogProvidersData } = useListCatalogLLMProviders(
     { orgName: orgId },

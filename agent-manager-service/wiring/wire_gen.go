@@ -576,6 +576,7 @@ func ProvideOCClient(cfg config.Config, authProvider client.AuthProvider) (clien
 		BaseURL:          cfg.OpenChoreo.BaseURL,
 		DefaultNamespace: cfg.OpenChoreo.DefaultNamespace,
 		AuthProvider:     authProvider,
+		ResourceLabels:   cfg.OpenChoreo.ResourceLabels,
 	})
 }
 

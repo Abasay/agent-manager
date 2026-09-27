@@ -28,7 +28,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { useCallback } from "react";
 import type { CreateAgentFormValues } from "../form/schema";
-import type { InputInterfaceType } from "@agent-management-platform/types";
+import { type InputInterfaceType, INPUT_LIMITS } from "@agent-management-platform/types";
 
 interface InputInterfaceProps {
   formData: CreateAgentFormValues;
@@ -228,6 +228,7 @@ export const InputInterface = ({
               <Box display="flex" flexDirection="column" flexGrow={1}>
                 <Form.ElementWrapper label="OpenAPI Spec Path" name="openApiPath">
                   <TextField
+                    slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.PATH } }}
                     id="openApiPath"
                     placeholder="/openapi.yaml"
                     required
@@ -262,6 +263,7 @@ export const InputInterface = ({
             </Form.Stack>
             <Form.ElementWrapper label="Base Path" name="basePath">
               <TextField
+                slotProps={{ htmlInput: { maxLength: INPUT_LIMITS.PATH } }}
                 id="basePath"
                 placeholder="/"
                 required
