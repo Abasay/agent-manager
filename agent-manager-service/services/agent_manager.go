@@ -2109,7 +2109,10 @@ func (s *agentManagerService) UpdateAgentBuildParameters(ctx context.Context, ou
 	// the gateway as a kind: Agent, so turning one into a REST agent (or the
 	// reverse) would leave the deployed shape and the recorded subtype apart.
 	// Switching between chat-api and custom-api stays allowed: both are REST.
-	requestedSubType := utils.StrPointerAsStr(req.AgentType.SubType, "")
+	if req.AgentType.SubType == nil {
+		req.AgentType.SubType = &existingAgent.Type.SubType // the update rewrites the label, so keep it
+	}
+	requestedSubType := *req.AgentType.SubType
 	if utils.IsA2AAgentSubType(requestedSubType) != utils.IsA2AAgentSubType(existingAgent.Type.SubType) {
 		s.logger.Error("Cannot change agent sub type across the A2A boundary", "existingSubType", existingAgent.Type.SubType, "requestedSubType", requestedSubType)
 		return nil, fmt.Errorf("%w: agent sub type cannot be changed between an A2A agent and a REST agent", utils.ErrImmutableFieldChange)

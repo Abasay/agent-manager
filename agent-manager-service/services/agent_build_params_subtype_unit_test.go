@@ -111,3 +111,20 @@ func TestUpdateBuildParametersAllowsChatToCustomAPI(t *testing.T) {
 	assert.Equal(t, string(utils.AgentSubTypeCustomAPI),
 		ocClient.UpdateComponentBuildParametersCalls()[0].Req.AgentType.SubType)
 }
+
+// subType is optional on the request, and OpenChoreo rewrites the subtype label
+// from it, so an omitted one keeps the agent's current subtype.
+func TestUpdateBuildParametersKeepsTheSubTypeWhenOmitted(t *testing.T) {
+	svc, ocClient := buildParamsServiceForSubType(string(utils.AgentSubTypeA2A))
+	req := buildParamsRequestWithSubType("")
+	req.AgentType.SubType = nil
+	port := int32(9099)
+	req.InputInterface.Port = &port
+
+	_, err := svc.UpdateAgentBuildParameters(context.Background(), "org-1", "proj-1", "agent-1", req)
+
+	require.NoError(t, err)
+	require.Len(t, ocClient.UpdateComponentBuildParametersCalls(), 1)
+	assert.Equal(t, string(utils.AgentSubTypeA2A),
+		ocClient.UpdateComponentBuildParametersCalls()[0].Req.AgentType.SubType)
+}
