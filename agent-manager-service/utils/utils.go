@@ -793,7 +793,11 @@ func validateInputInterface(agentType spec.AgentType, inputInterface *spec.Input
 			return err
 		}
 	}
-	if StrPointerAsStr(agentType.SubType, "") == string(AgentSubTypeCustomAPI) {
+	subType := StrPointerAsStr(agentType.SubType, "")
+	if IsA2AAgentSubType(subType) {
+		return validateInputInterfacePort(inputInterface.Port)
+	}
+	if subType == string(AgentSubTypeCustomAPI) {
 		if inputInterface.Schema == nil {
 			return NewValidationError(
 				"Please provide a valid schema path starting with /",
@@ -809,11 +813,8 @@ func validateInputInterface(agentType spec.AgentType, inputInterface *spec.Input
 		); err != nil {
 			return err
 		}
-		if IntPointerAsInt(inputInterface.Port, 0) <= 0 || IntPointerAsInt(inputInterface.Port, 0) > 65535 {
-			return NewValidationError(
-				"Please provide a valid port number between 1 and 65535",
-				"inputInterface.port must be a valid port number (1-65535)",
-			)
+		if err := validateInputInterfacePort(inputInterface.Port); err != nil {
+			return err
 		}
 		if StrPointerAsStr(inputInterface.BasePath, "") == "" {
 			return NewValidationError(
@@ -823,6 +824,16 @@ func validateInputInterface(agentType spec.AgentType, inputInterface *spec.Input
 		}
 	}
 
+	return nil
+}
+
+func validateInputInterfacePort(port *int32) error {
+	if p := IntPointerAsInt(port, 0); p <= 0 || p > 65535 {
+		return NewValidationError(
+			"Please provide a valid port number between 1 and 65535",
+			"inputInterface.port must be a valid port number (1-65535)",
+		)
+	}
 	return nil
 }
 

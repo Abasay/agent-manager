@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/wso2/agent-manager/agent-manager-service/spec"
 )
@@ -47,4 +48,84 @@ func TestValidateInputInterfaceA2ANeedsNoSchema(t *testing.T) {
 		&spec.InputInterface{Type: "HTTP", Port: &port},
 	)
 	assert.NoError(t, err)
+}
+
+func TestValidateInputInterfaceA2APort(t *testing.T) {
+	subType := string(AgentSubTypeA2A)
+	agentType := spec.AgentType{Type: string(AgentTypeAPI), SubType: &subType}
+	portOf := func(p int32) *int32 { return &p }
+
+	tests := []struct {
+		name    string
+		port    *int32
+		wantErr bool
+	}{
+		{name: "missing port", port: nil, wantErr: true},
+		{name: "zero port", port: portOf(0), wantErr: true},
+		{name: "port above range", port: portOf(70000), wantErr: true},
+		{name: "lowest valid port", port: portOf(1), wantErr: false},
+		{name: "highest valid port", port: portOf(65535), wantErr: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateInputInterface(agentType, &spec.InputInterface{Type: "HTTP", Port: tt.port})
+			if !tt.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.NotNil(t, IsValidationError(err))
+		})
+	}
+}
+
+func TestValidateInputInterfaceCustomAPI(t *testing.T) {
+	subType := string(AgentSubTypeCustomAPI)
+	agentType := spec.AgentType{Type: string(AgentTypeAPI), SubType: &subType}
+	portOf := func(p int32) *int32 { return &p }
+	schema := &spec.InputInterfaceSchema{Path: StrAsStrPointer("/openapi.yaml")}
+
+	tests := []struct {
+		name    string
+		iface   spec.InputInterface
+		wantErr string
+	}{
+		{name: "valid", iface: spec.InputInterface{Type: "HTTP", Port: portOf(8080), BasePath: StrAsStrPointer("/api"), Schema: schema}},
+		{name: "missing schema", iface: spec.InputInterface{Type: "HTTP", Port: portOf(8080), BasePath: StrAsStrPointer("/api")}, wantErr: "inputInterface.schema.path"},
+		{name: "missing port", iface: spec.InputInterface{Type: "HTTP", BasePath: StrAsStrPointer("/api"), Schema: schema}, wantErr: "inputInterface.port"},
+		{name: "port above range", iface: spec.InputInterface{Type: "HTTP", Port: portOf(70000), BasePath: StrAsStrPointer("/api"), Schema: schema}, wantErr: "inputInterface.port"},
+		{name: "missing base path", iface: spec.InputInterface{Type: "HTTP", Port: portOf(8080), Schema: schema}, wantErr: "inputInterface.basePath is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			iface := tt.iface
+			err := validateInputInterface(agentType, &iface)
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+// Build-parameter updates reuse the create validation, so a portless A2A update is rejected.
+func TestValidateAgentBuildParametersUpdateRejectsA2AWithoutPort(t *testing.T) {
+	subType := string(AgentSubTypeA2A)
+	payload := spec.UpdateAgentBuildParametersRequest{
+		Provisioning: spec.Provisioning{
+			Type: string(InternalAgent),
+			Repository: &spec.RepositoryConfig{
+				Url:     "https://github.com/wso2/agent-manager",
+				Branch:  "main",
+				AppPath: "/",
+			},
+		},
+		AgentType:      spec.AgentType{Type: string(AgentTypeAPI), SubType: &subType},
+		InputInterface: spec.InputInterface{Type: "HTTP"},
+	}
+	err := ValidateAgentBuildParametersUpdatePayload(payload)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "inputInterface.port")
 }
