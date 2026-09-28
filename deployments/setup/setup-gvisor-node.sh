@@ -103,17 +103,36 @@ else
         *) echo "❌ Unsupported architecture: $ARCH"; exit 1 ;;
     esac
 
-    echo "📥 Downloading gVisor binaries (${GVISOR_ARCH})..."
+    if command -v zstd &>/dev/null; then
+        TARBALL="gvisor.tar.zstd"; DECOMPRESS=(zstd -dc)
+    elif command -v bzip2 &>/dev/null; then
+        TARBALL="gvisor.tar.bz2"; DECOMPRESS=(bzip2 -dc)
+    else
+        echo "❌ zstd or bzip2 is required to unpack the gVisor release."
+        exit 1
+    fi
+    # macOS has shasum but not sha512sum.
+    if command -v sha512sum &>/dev/null; then SHA512=(sha512sum); else SHA512=(shasum -a 512); fi
+
+    echo "📥 Downloading gVisor release (${GVISOR_ARCH})..."
     BASE="https://storage.googleapis.com/gvisor/releases/release/latest/${GVISOR_ARCH}"
-    curl -fsSL "${BASE}/runsc" -o /tmp/runsc
-    curl -fsSL "${BASE}/containerd-shim-runsc-v1" -o /tmp/containerd-shim-runsc-v1
-    chmod +x /tmp/runsc /tmp/containerd-shim-runsc-v1
+    GVISOR_TMP="$(mktemp -d)"
+    trap 'rm -rf "${GVISOR_TMP}"' EXIT
+    curl -fsSL --retry 3 "${BASE}/${TARBALL}" -o "${GVISOR_TMP}/${TARBALL}"
+    curl -fsSL --retry 3 "${BASE}/${TARBALL}.sha512" -o "${GVISOR_TMP}/${TARBALL}.sha512"
+    ( cd "${GVISOR_TMP}" && "${SHA512[@]}" -c "${TARBALL}.sha512" >/dev/null ) || {
+        echo "❌ gVisor release checksum verification failed — aborting."
+        exit 1
+    }
+    "${DECOMPRESS[@]}" "${GVISOR_TMP}/${TARBALL}" \
+        | tar -xf - -C "${GVISOR_TMP}" runsc containerd-shim-runsc-v1
 
     echo "📦 Installing runsc into ${NODE_NAME}..."
     docker exec "${NODE_CONTAINER}" mkdir -p /usr/local/bin
-    docker cp /tmp/runsc "${NODE_CONTAINER}:/usr/local/bin/runsc"
-    docker cp /tmp/containerd-shim-runsc-v1 "${NODE_CONTAINER}:/usr/local/bin/containerd-shim-runsc-v1"
-    rm -f /tmp/runsc /tmp/containerd-shim-runsc-v1
+    docker cp "${GVISOR_TMP}/runsc" "${NODE_CONTAINER}:/usr/local/bin/runsc"
+    docker cp "${GVISOR_TMP}/containerd-shim-runsc-v1" "${NODE_CONTAINER}:/usr/local/bin/containerd-shim-runsc-v1"
+    rm -rf "${GVISOR_TMP}"
+    trap - EXIT
 fi
 
 # --- 3b. Configure containerd's runsc runtime + network mode (IDEMPOTENT, every run) ---

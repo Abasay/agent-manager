@@ -29,6 +29,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #   - x86_64 or aarch64 (arm64) architecture
 #   - Running containerd (systemctl is-active containerd)
 #   - Internet access to storage.googleapis.com
+#   - zstd or bzip2
 #
 # Idempotent: safe to re-run. Already-installed components are skipped.
 
@@ -75,20 +76,31 @@ echo "   containerd: v${CONTAINERD_VERSION}"
 if command -v runsc &>/dev/null && runsc --version &>/dev/null 2>&1; then
     echo "✅ runsc already installed ($(runsc --version 2>&1 | head -1)) — skipping download"
 else
-    echo "📥 Downloading gVisor binaries (${GVISOR_ARCH})..."
+    # extract the runsc and containerd-shim-runsc-v1 from the tarball
+    if command -v zstd &>/dev/null; then
+        TARBALL="gvisor.tar.zstd"; DECOMPRESS=(zstd -dc)
+    elif command -v bzip2 &>/dev/null; then
+        TARBALL="gvisor.tar.bz2"; DECOMPRESS=(bzip2 -dc)
+    else
+        echo "❌ zstd or bzip2 is required to unpack the gVisor release. Install one and re-run."
+        exit 1
+    fi
+
+    echo "📥 Downloading gVisor release (${GVISOR_ARCH})..."
     BASE="https://storage.googleapis.com/gvisor/releases/release/latest/${GVISOR_ARCH}"
     # Download into a private temp dir (not predictable /tmp paths) and remove it on exit.
-    GVISOR_TMP="$(mktemp -d)"
+    #the tarball is ~130 MB and /tmp may be RAM-backed.
+    GVISOR_TMP="$(mktemp -d /var/tmp/gvisor.XXXXXX)"
     trap 'rm -rf "${GVISOR_TMP}"' EXIT
-    for bin in runsc containerd-shim-runsc-v1; do
-        curl -fsSL --retry 3 "${BASE}/${bin}" -o "${GVISOR_TMP}/${bin}"
-        # gVisor publishes a .sha512 alongside each binary; verify before trusting it.
-        curl -fsSL --retry 3 "${BASE}/${bin}.sha512" -o "${GVISOR_TMP}/${bin}.sha512"
-    done
-    ( cd "${GVISOR_TMP}" && sha512sum -c runsc.sha512 containerd-shim-runsc-v1.sha512 ) || {
-        echo "❌ gVisor binary checksum verification failed — aborting."
+    curl -fsSL --retry 3 "${BASE}/${TARBALL}" -o "${GVISOR_TMP}/${TARBALL}"
+    # gVisor publishes a .sha512 alongside the tarball; verify before trusting it.
+    curl -fsSL --retry 3 "${BASE}/${TARBALL}.sha512" -o "${GVISOR_TMP}/${TARBALL}.sha512"
+    ( cd "${GVISOR_TMP}" && sha512sum -c "${TARBALL}.sha512" ) || {
+        echo "❌ gVisor release checksum verification failed — aborting."
         exit 1
     }
+    "${DECOMPRESS[@]}" "${GVISOR_TMP}/${TARBALL}" \
+        | tar -xf - -C "${GVISOR_TMP}" runsc containerd-shim-runsc-v1
     chmod +x "${GVISOR_TMP}/runsc" "${GVISOR_TMP}/containerd-shim-runsc-v1"
     mv "${GVISOR_TMP}/runsc" /usr/local/bin/runsc
     mv "${GVISOR_TMP}/containerd-shim-runsc-v1" /usr/local/bin/containerd-shim-runsc-v1
