@@ -541,7 +541,9 @@ func validateAgentSubType(agentType spec.AgentType) error {
 	}
 	// Validate subtype for API agent type
 	subType := StrPointerAsStr(agentType.SubType, "")
-	if subType != string(AgentSubTypeChatAPI) && subType != string(AgentSubTypeCustomAPI) {
+	if subType != string(AgentSubTypeChatAPI) &&
+		subType != string(AgentSubTypeCustomAPI) &&
+		subType != string(AgentSubTypeA2A) {
 		return NewValidationErrorf(
 			"The selected agent subtype is not supported for this agent type",
 			"unsupported agent subtype for type %s: %s", agentType.Type, subType,
@@ -791,7 +793,11 @@ func validateInputInterface(agentType spec.AgentType, inputInterface *spec.Input
 			return err
 		}
 	}
-	if StrPointerAsStr(agentType.SubType, "") == string(AgentSubTypeCustomAPI) {
+	subType := StrPointerAsStr(agentType.SubType, "")
+	if IsA2AAgentSubType(subType) {
+		return validateInputInterfacePort(inputInterface.Port)
+	}
+	if subType == string(AgentSubTypeCustomAPI) {
 		if inputInterface.Schema == nil {
 			return NewValidationError(
 				"Please provide a valid schema path starting with /",
@@ -807,11 +813,8 @@ func validateInputInterface(agentType spec.AgentType, inputInterface *spec.Input
 		); err != nil {
 			return err
 		}
-		if IntPointerAsInt(inputInterface.Port, 0) <= 0 || IntPointerAsInt(inputInterface.Port, 0) > 65535 {
-			return NewValidationError(
-				"Please provide a valid port number between 1 and 65535",
-				"inputInterface.port must be a valid port number (1-65535)",
-			)
+		if err := validateInputInterfacePort(inputInterface.Port); err != nil {
+			return err
 		}
 		if StrPointerAsStr(inputInterface.BasePath, "") == "" {
 			return NewValidationError(
@@ -821,6 +824,16 @@ func validateInputInterface(agentType spec.AgentType, inputInterface *spec.Input
 		}
 	}
 
+	return nil
+}
+
+func validateInputInterfacePort(port *int32) error {
+	if p := IntPointerAsInt(port, 0); p <= 0 || p > 65535 {
+		return NewValidationError(
+			"Please provide a valid port number between 1 and 65535",
+			"inputInterface.port must be a valid port number (1-65535)",
+		)
+	}
 	return nil
 }
 
@@ -922,10 +935,11 @@ func ValidatePromoteAgentRequest(payload *spec.PromoteAgentRequest) error {
 			payload.InstrumentationVersion.IsSet() ||
 			payload.EnableApiKeySecurity != nil ||
 			payload.CorsConfig != nil ||
+			payload.AgentCardCorsConfig != nil ||
 			payload.EnableOAuthSecurity != nil ||
 			payload.OauthConfig != nil ||
 			payload.ResilienceTimeoutSeconds != nil {
-			return fmt.Errorf("useConfigFromSourceEnv=true is mutually exclusive with env, files, enableAutoInstrumentation, instrumentationVersion, enableApiKeySecurity, corsConfig, enableOAuthSecurity, oauthConfig, and resilienceTimeoutSeconds")
+			return fmt.Errorf("useConfigFromSourceEnv=true is mutually exclusive with env, files, enableAutoInstrumentation, instrumentationVersion, enableApiKeySecurity, corsConfig, agentCardCorsConfig, enableOAuthSecurity, oauthConfig, and resilienceTimeoutSeconds")
 		}
 	}
 

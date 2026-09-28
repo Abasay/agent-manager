@@ -21,7 +21,7 @@ data:
   # Gateway control plane URL for gateway setup commands
   GATEWAY_CONTROL_PLANE_URL: {{ .Values.console.config.gatewayControlPlaneUrl | default "http://localhost:9243" | quote }}
   # Gateway version for setup commands
-  GATEWAY_VERSION: {{ .Values.console.config.gatewayVersion | default "v1.0.0" | quote }}
+  GATEWAY_VERSION: {{ .Values.console.config.gatewayVersion | default "v2026.09.24" | quote }}
   # Agent Manager release version — pins the deployment-script git tag (amp/vX.Y.Z)
   AMP_VERSION: {{ .Values.console.config.ampVersion | default "v1.0.0" | quote }}
   # Base URL the console's generated commands fetch deployment scripts from.

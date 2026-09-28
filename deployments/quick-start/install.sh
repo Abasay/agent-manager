@@ -45,12 +45,8 @@ GATEWAY_OPERATOR_VERSION="0.11.0"
 # reaches Programmed=True). Chart *version* and container *image tag* are
 # pinned separately below — setting chartVersion alone still runs an older
 # default image, so GATEWAY_IMAGE_VERSION must also be threaded through.
-# The chart trails the images: 1.2.1 gateway-controller/gateway-runtime images
-# are published, but no 1.2.1 gateway chart is, so the newest chart (1.2.2,
-# whose defaults point at 1.2.0 images) is pinned and the image tag override
-# below carries the runtime forward to 1.2.1.
-GATEWAY_CHART_VERSION="1.2.2"
-GATEWAY_IMAGE_VERSION="1.2.1"
+GATEWAY_CHART_VERSION="2026.09.24"
+GATEWAY_IMAGE_VERSION="2026.09.24"
 
 # The gateway chart (1.2.0-beta+) requires an encryption key to be mounted from a Kubernetes Secret
 GATEWAY_ENCRYPTION_SECRET_NAME="gateway-encryption-keys"

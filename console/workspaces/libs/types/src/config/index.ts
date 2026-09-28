@@ -29,7 +29,7 @@ export interface AppConfig {
   configDiscoveryBaseUrl?: string;
   /** Gateway control plane URL (default: http://localhost:9243). Used for gateway setup commands. */
   gatewayControlPlaneUrl?: string;
-  /** Gateway version used in setup commands (default: v0.9.0). */
+  /** Gateway version used in setup commands (default: v2026.09.24). */
   gatewayVersion?: string;
   /**
    * Agent Manager release version (e.g. v0.15.0); pins the deployment-script

@@ -517,8 +517,8 @@ console:
     # agentManagerService.ocIngress.gatewayMgmt); host.docker.internal lets a
     # gateway container on the same machine reach it.
     gatewayControlPlaneUrl: "http://host.docker.internal:8080"
-    # Gateway version for setup commands (default: v1.0.0)
-    gatewayVersion: "v1.0.0"
+    # Gateway version for setup commands (default: v2026.09.24)
+    gatewayVersion: "v2026.09.24"
     # Agent Manager release version — pins the deployment-script git tag (amp/vX.Y.Z).
     # Placeholder is substituted with the real release version by the release
     # pipeline (.github/scripts/update-helm-charts.sh); dev builds fall back to main.

@@ -106,22 +106,39 @@ func NewGatewayInternalAPIService(
 // agent-scoped mapping artifact (artifacts); both live in the deployments table keyed by
 // artifact_uuid, so a single lookup handles both cases.
 func (s *GatewayInternalAPIService) GetActiveMCPProxyDeploymentByGateway(ctx context.Context, proxyID, ouID, gatewayID string) (map[string]string, error) {
-	deployment, err := s.deploymentRepo.GetCurrentByGateway(proxyID, gatewayID, ouID)
+	return s.getActiveArtifactDeploymentByGateway(ctx, proxyID, ouID, gatewayID, "MCP proxy", utils.ErrMCPProxyNotFound)
+}
+
+// GetActiveAgentDeploymentByGateway retrieves the currently deployed A2A Agent
+// artifact for the given UUID on this gateway.
+//
+// The UUID is the per-environment models.KindAgent artifact row, which is also
+// what the agent's API keys are bound to — so the gateway resolves the Agent
+// and its keys through the same identity.
+func (s *GatewayInternalAPIService) GetActiveAgentDeploymentByGateway(ctx context.Context, agentID, ouID, gatewayID string) (map[string]string, error) {
+	return s.getActiveArtifactDeploymentByGateway(ctx, agentID, ouID, gatewayID, "Agent", utils.ErrAgentArtifactNotFound)
+}
+
+// getActiveArtifactDeploymentByGateway returns the artifact's deployed YAML with secrets resolved, or notFound.
+func (s *GatewayInternalAPIService) getActiveArtifactDeploymentByGateway(
+	ctx context.Context, artifactID, ouID, gatewayID, kindLabel string, notFound error,
+) (map[string]string, error) {
+	deployment, err := s.deploymentRepo.GetCurrentByGateway(artifactID, gatewayID, ouID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deployment: %w", err)
 	}
 	if deployment == nil {
-		return nil, utils.ErrMCPProxyNotFound
+		return nil, notFound
 	}
 
 	resolvedYaml, err := s.resolveAllSecretsInYAML(ctx, string(deployment.Content))
 	if err != nil {
-		slog.Error("GatewayInternalAPIService: failed to resolve secrets in MCP proxy YAML",
-			"proxyID", proxyID, "error", err)
+		slog.Error("GatewayInternalAPIService: failed to resolve secrets in "+kindLabel+" YAML",
+			"artifactID", artifactID, "error", err)
 		return nil, fmt.Errorf("failed to resolve secrets: %w", err)
 	}
 
-	return map[string]string{proxyID: resolvedYaml}, nil
+	return map[string]string{artifactID: resolvedYaml}, nil
 }
 
 // GetActiveDeploymentByGateway retrieves the currently deployed API artifact for a specific gateway

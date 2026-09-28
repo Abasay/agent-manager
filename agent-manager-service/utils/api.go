@@ -26,128 +26,53 @@ import (
 // CreateAPIYamlZip creates a ZIP file containing API YAML files
 // Compatible with api-platform's implementation
 func CreateAPIYamlZip(apiYamlMap map[string]string) ([]byte, error) {
-	var buf bytes.Buffer
-	zipWriter := zip.NewWriter(&buf)
-
-	for apiID, yamlContent := range apiYamlMap {
-		fileName := fmt.Sprintf("api-%s.yaml", apiID)
-		fileWriter, err := zipWriter.Create(fileName)
-		if err != nil {
-			if closeErr := zipWriter.Close(); closeErr != nil {
-				return nil, errors.Join(fmt.Errorf("failed to create file in zip: %w", err), fmt.Errorf("close error: %w", closeErr))
-			}
-			return nil, fmt.Errorf("failed to create file in zip: %w", err)
-		}
-
-		_, err = fileWriter.Write([]byte(yamlContent))
-		if err != nil {
-			if closeErr := zipWriter.Close(); closeErr != nil {
-				return nil, errors.Join(fmt.Errorf("failed to write file content: %w", err), fmt.Errorf("close error: %w", closeErr))
-			}
-			return nil, fmt.Errorf("failed to write file content: %w", err)
-		}
-	}
-
-	err := zipWriter.Close()
-	if err != nil {
-		return nil, fmt.Errorf("failed to close zip writer: %w", err)
-	}
-
-	return buf.Bytes(), nil
+	return createYamlZip("api-", apiYamlMap)
 }
 
 // CreateLLMProviderYamlZip creates a ZIP file containing LLM provider YAML files
 func CreateLLMProviderYamlZip(providerYamlMap map[string]string) ([]byte, error) {
-	var buf bytes.Buffer
-	zipWriter := zip.NewWriter(&buf)
-
-	for providerID, yamlContent := range providerYamlMap {
-		fileName := fmt.Sprintf("llm-provider-%s.yaml", providerID)
-		fileWriter, err := zipWriter.Create(fileName)
-		if err != nil {
-			if closeErr := zipWriter.Close(); closeErr != nil {
-				return nil, errors.Join(fmt.Errorf("failed to create file in zip: %w", err), fmt.Errorf("close error: %w", closeErr))
-			}
-			return nil, fmt.Errorf("failed to create file in zip: %w", err)
-		}
-
-		_, err = fileWriter.Write([]byte(yamlContent))
-		if err != nil {
-			if closeErr := zipWriter.Close(); closeErr != nil {
-				return nil, errors.Join(fmt.Errorf("failed to write file content: %w", err), fmt.Errorf("close error: %w", closeErr))
-			}
-			return nil, fmt.Errorf("failed to write file content: %w", err)
-		}
-	}
-
-	err := zipWriter.Close()
-	if err != nil {
-		return nil, fmt.Errorf("failed to close zip writer: %w", err)
-	}
-
-	return buf.Bytes(), nil
+	return createYamlZip("llm-provider-", providerYamlMap)
 }
 
 // CreateLLMProxyYamlZip creates a ZIP file containing LLM proxy YAML files
 func CreateLLMProxyYamlZip(proxyYamlMap map[string]string) ([]byte, error) {
-	var buf bytes.Buffer
-	zipWriter := zip.NewWriter(&buf)
-
-	for proxyID, yamlContent := range proxyYamlMap {
-		fileName := fmt.Sprintf("llm-proxy-%s.yaml", proxyID)
-		fileWriter, err := zipWriter.Create(fileName)
-		if err != nil {
-			if closeErr := zipWriter.Close(); closeErr != nil {
-				return nil, errors.Join(fmt.Errorf("failed to create file in zip: %w", err), fmt.Errorf("close error: %w", closeErr))
-			}
-			return nil, fmt.Errorf("failed to create file in zip: %w", err)
-		}
-
-		_, err = fileWriter.Write([]byte(yamlContent))
-		if err != nil {
-			if closeErr := zipWriter.Close(); closeErr != nil {
-				return nil, errors.Join(fmt.Errorf("failed to write file content: %w", err), fmt.Errorf("close error: %w", closeErr))
-			}
-			return nil, fmt.Errorf("failed to write file content: %w", err)
-		}
-	}
-
-	err := zipWriter.Close()
-	if err != nil {
-		return nil, fmt.Errorf("failed to close zip writer: %w", err)
-	}
-
-	return buf.Bytes(), nil
+	return createYamlZip("llm-proxy-", proxyYamlMap)
 }
 
 // CreateMCPProxyYamlZip creates a ZIP file containing MCP proxy YAML files.
 func CreateMCPProxyYamlZip(proxyYamlMap map[string]string) ([]byte, error) {
+	return createYamlZip("mcp-proxy-", proxyYamlMap)
+}
+
+// CreateAgentYamlZip creates a ZIP file containing A2A Agent YAML files.
+func CreateAgentYamlZip(agentYamlMap map[string]string) ([]byte, error) {
+	return createYamlZip("agent-", agentYamlMap)
+}
+
+// createYamlZip writes each YAML as <prefix><id>.yaml at the zip root.
+func createYamlZip(fileNamePrefix string, yamlMap map[string]string) ([]byte, error) {
 	var buf bytes.Buffer
 	zipWriter := zip.NewWriter(&buf)
 
-	for proxyID, yamlContent := range proxyYamlMap {
-		fileName := fmt.Sprintf("mcp-proxy-%s.yaml", proxyID)
-		fileWriter, err := zipWriter.Create(fileName)
+	for id, yamlContent := range yamlMap {
+		fileWriter, err := zipWriter.Create(fmt.Sprintf("%s%s.yaml", fileNamePrefix, id))
 		if err != nil {
-			if closeErr := zipWriter.Close(); closeErr != nil {
-				return nil, errors.Join(fmt.Errorf("failed to create file in zip: %w", err), fmt.Errorf("close error: %w", closeErr))
-			}
-			return nil, fmt.Errorf("failed to create file in zip: %w", err)
+			return nil, closeAfterZipError(zipWriter, fmt.Errorf("failed to create file in zip: %w", err))
 		}
-
-		_, err = fileWriter.Write([]byte(yamlContent))
-		if err != nil {
-			if closeErr := zipWriter.Close(); closeErr != nil {
-				return nil, errors.Join(fmt.Errorf("failed to write file content: %w", err), fmt.Errorf("close error: %w", closeErr))
-			}
-			return nil, fmt.Errorf("failed to write file content: %w", err)
+		if _, err := fileWriter.Write([]byte(yamlContent)); err != nil {
+			return nil, closeAfterZipError(zipWriter, fmt.Errorf("failed to write file content: %w", err))
 		}
 	}
 
-	err := zipWriter.Close()
-	if err != nil {
+	if err := zipWriter.Close(); err != nil {
 		return nil, fmt.Errorf("failed to close zip writer: %w", err)
 	}
-
 	return buf.Bytes(), nil
+}
+
+func closeAfterZipError(zipWriter *zip.Writer, err error) error {
+	if closeErr := zipWriter.Close(); closeErr != nil {
+		return errors.Join(err, fmt.Errorf("close error: %w", closeErr))
+	}
+	return err
 }

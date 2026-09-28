@@ -23,7 +23,7 @@ import { globalConfig } from "@agent-management-platform/types";
  * (e.g. local dev without a runtime config). Released builds have the real
  * version substituted at deploy time.
  */
-export const DEFAULT_GATEWAY_VERSION = "v0.9.0";
+export const DEFAULT_GATEWAY_VERSION = "v2026.09.24";
 
 /** The configured gateway version, e.g. "v0.15.0" (carries a leading "v"). */
 export function getGatewayVersion(): string {

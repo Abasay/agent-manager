@@ -1727,8 +1727,8 @@
               "type": "string"
             },
             "gatewayVersion": {
-              "default": "v1.0.0",
-              "description": "Gateway version for setup commands (default: v1.0.0)",
+              "default": "v2026.09.24",
+              "description": "Gateway version for setup commands (default: v2026.09.24)",
               "title": "gatewayVersion",
               "type": "string"
             },
