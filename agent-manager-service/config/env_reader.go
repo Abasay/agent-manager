@@ -105,12 +105,17 @@ func (c *configReader) readNullableInt64(envVarName string) *int64 {
 }
 
 func (c *configReader) readOptionalBool(envVarName string, defaultValue bool) bool {
-	v := os.Getenv(envVarName)
+	raw := os.Getenv(envVarName)
+	v := strings.TrimSpace(raw)
 	if v == "" {
 		return defaultValue
 	}
 	value, err := strconv.ParseBool(v)
 	if err != nil {
+		// Falling back silently makes a typo look like a deliberate setting,
+		// so say which variable was ignored and what it held.
+		slog.Warn("configReader: ignoring unparseable boolean, using default",
+			"env", envVarName, "value", raw, "default", defaultValue)
 		return defaultValue
 	}
 	return value

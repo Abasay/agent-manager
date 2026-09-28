@@ -158,14 +158,30 @@ type eventSender interface {
 }
 
 // sharedHTTPClient is reused across every Track-wrapped request so
-// connections to the collector proxy get pooled rather than dialed fresh
-// per event.
-var sharedHTTPClient = requests.NewRetryableHTTPClient(&http.Client{Timeout: eventSendTimeout})
+// connections to the configured endpoint (a collector proxy or
+// api.moesif.net) get pooled rather than dialed fresh per event.
+//
+// Deliberately not retrying: Moesif does not deduplicate, so a retry after a
+// timeout or 5xx that the server had already accepted double-counts usage,
+// and retrying a 429 only spends more of the customer's quota. Losing an
+// occasional event is the cheaper failure for telemetry.
+//
+// Redirects are refused because Go strips Authorization on a cross-host
+// redirect but keeps custom headers: following one would hand
+// X-Moesif-Application-Id to whatever host the redirect names, over any
+// scheme, bypassing the https check done at config load.
+var sharedHTTPClient requests.HttpClient = &http.Client{
+	Timeout: eventSendTimeout,
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
 
-// newSender builds the eventSender used to deliver an event, authenticating
-// with the given caller JWT (forwarded from the request being tracked, not
-// a config credential — see the package doc comment). A package var so
-// tests can substitute a fake in place of the real client.
+// newSender builds the eventSender used to deliver an event. It
+// authenticates with ga.MoesifApplicationID when set; otherwise with the
+// given caller JWT, forwarded from the request being tracked (see the
+// package doc comment). A package var so tests can substitute a fake in place
+// of the real client.
 var newSender = func(ga config.GrowthAnalyticsConfig, token string) eventSender {
 	return moesifcollector.NewClient(sharedHTTPClient, ga.MoesifCollectorBaseURL, token, ga.MoesifCollectorHostHeader, ga.MoesifApplicationID)
 }
@@ -186,10 +202,12 @@ var newSender = func(ga config.GrowthAnalyticsConfig, token string) eventSender 
 // environment without deleting the rest of the configuration.
 // IsOnPremDeployment is not consulted: both switches are off by default, so
 // any deployment that reports has opted in, and deployment_model labels its
-// events as on-prem or SaaS. Every route Track wraps requires
-// authentication (see the package doc comment on the token this uses), so a
-// missing caller JWT at send time is treated as a bug, not a normal case —
-// it's logged and the event is dropped rather than sent unauthenticated.
+// events as on-prem or SaaS. The collector URL is either set explicitly or
+// defaulted to api.moesif.net when MOESIF_APPLICATION_ID is set. In proxy
+// mode (no Application ID) every route Track wraps requires authentication,
+// so a missing caller JWT at send time is treated as a bug: it's logged and
+// the event is dropped rather than sent unauthenticated. With an Application
+// ID the caller JWT is not the credential and is not needed.
 //
 // Request and response bodies are never forwarded to Moesif: several of the
 // routes this wraps return generated secrets (API keys, tokens, identity
@@ -285,6 +303,9 @@ func reportEvent(
 	// maxInFlightConsoleSends): a slow collector must cost a fixed number of
 	// goroutines, not one per tracked request. Captured once so the goroutine
 	// releases the semaphore it acquired even if tests swap the variable.
+	// The sender is built first: anything that can panic must run before a
+	// slot is taken, or the slot would never be returned.
+	sender := newSender(ga, token)
 	slots := eventSendSlots
 	select {
 	case slots <- struct{}{}:
@@ -294,7 +315,6 @@ func reportEvent(
 		return
 	}
 
-	sender := newSender(ga, token)
 	go func() {
 		defer func() { <-slots }()
 		defer func() {

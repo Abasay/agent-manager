@@ -673,20 +673,17 @@ func TestClientIP(t *testing.T) {
 }
 
 // TestTrack_DropsEventWhenSendPoolFull: a slow collector must cost a fixed
-// number of goroutines. With every slot taken, the event is dropped before a
-// sender is built and the caller's response is untouched.
+// number of goroutines. With every slot taken, the event is dropped without
+// being sent and the caller's response is untouched.
 func TestTrack_DropsEventWhenSendPoolFull(t *testing.T) {
 	withGrowthAnalyticsConfig(t, "http://localhost:18080/moesif-collector")
+	fs, _ := withFakeSender(t)
 
-	orig, origSlots := newSender, eventSendSlots
+	origSlots := eventSendSlots
 	full := make(chan struct{}, 1)
 	full <- struct{}{}
 	eventSendSlots = full
-	newSender = func(config.GrowthAnalyticsConfig, string) eventSender {
-		t.Fatal("newSender must not be called when the send pool is full")
-		return nil
-	}
-	t.Cleanup(func() { newSender, eventSendSlots = orig, origSlots })
+	t.Cleanup(func() { eventSendSlots = origSlots })
 
 	tracked := Track("amp.agent-development.create-agent", nil, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
@@ -696,6 +693,14 @@ func TestTrack_DropsEventWhenSendPoolFull(t *testing.T) {
 
 	if w.Code != http.StatusCreated {
 		t.Errorf("status = %d, want 201", w.Code)
+	}
+	select {
+	case evt := <-fs.calls:
+		t.Fatalf("event sent despite a full send pool: %+v", evt)
+	case <-time.After(200 * time.Millisecond):
+	}
+	if len(full) != 1 {
+		t.Errorf("slot count = %d, want 1 (a dropped event must not take or release a slot)", len(full))
 	}
 }
 
@@ -730,4 +735,26 @@ func TestTrack_ApplicationIDMode_SendsWithoutCallerJWT(t *testing.T) {
 	tracked(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/agents", nil)) // no caller JWT
 
 	waitForEvent(t, fs)
+}
+
+// TestSharedHTTPClient_RefusesRedirects: a redirect must not carry the
+// Application ID header to another host, so the client stops at the 3xx.
+func TestSharedHTTPClient_RefusesRedirects(t *testing.T) {
+	var followed bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		followed = true
+	}))
+	t.Cleanup(target.Close)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/v1/events", http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(origin.Close)
+
+	client := moesifcollector.NewClient(sharedHTTPClient, origin.URL, "", "", "app-id")
+	if err := client.SendEvent(context.Background(), moesifcollector.Event{}); err == nil {
+		t.Error("SendEvent() error = nil, want an error for the unfollowed redirect")
+	}
+	if followed {
+		t.Error("redirect was followed; the Application ID would have reached another host")
+	}
 }

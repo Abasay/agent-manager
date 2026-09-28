@@ -781,7 +781,7 @@ func TestLogGrowthAnalyticsState(t *testing.T) {
 			name:         "no collector URL names that reason",
 			ga:           GrowthAnalyticsConfig{Enabled: true},
 			wantLevel:    slog.LevelInfo,
-			wantContains: "MOESIF_COLLECTOR_BASE_URL is unset",
+			wantContains: "neither MOESIF_APPLICATION_ID nor MOESIF_COLLECTOR_BASE_URL is set",
 		},
 		{
 			name:         "kill switch names that reason instead",
@@ -819,5 +819,71 @@ func TestLogGrowthAnalyticsState(t *testing.T) {
 				t.Errorf("log %q is not at level %s", got, tc.wantLevel)
 			}
 		})
+	}
+}
+
+func TestIsLoopbackHost(t *testing.T) {
+	for host, want := range map[string]bool{
+		"localhost":          true,
+		"LOCALHOST":          true,
+		"127.0.0.1":          true,
+		"127.5.5.5":          true,
+		"::1":                true,
+		"localhost.evil.com": false,
+		"127.0.0.1.nip.io":   false,
+		"10.0.0.1":           false,
+		"":                   false,
+	} {
+		if got := isLoopbackHost(host); got != want {
+			t.Errorf("isLoopbackHost(%q) = %v, want %v", host, got, want)
+		}
+	}
+}
+
+// TestLoadEnvs_MoesifApplicationID: the ID is read from the environment,
+// trimmed, and on its own points tracking at Moesif's API. A whitespace-only
+// value must not switch on Application ID mode with a blank credential.
+func TestLoadEnvs_MoesifApplicationID(t *testing.T) {
+	for k, v := range map[string]string{
+		"OPEN_CHOREO_BASE_URL": "http://localhost/api/v1",
+		"DB_HOST":              "localhost",
+		"DB_USER":              "unit",
+		"DB_PASSWORD":          "unit",
+		"DB_NAME":              "unit",
+		"MOESIF_ENABLED":       "true",
+	} {
+		t.Setenv(k, v)
+	}
+	t.Setenv("MOESIF_COLLECTOR_BASE_URL", "")
+
+	t.Run("trimmed and defaults the URL", func(t *testing.T) {
+		t.Setenv("MOESIF_APPLICATION_ID", "  app-id \n")
+		loadEnvs()
+		if got := config.GrowthAnalytics.MoesifApplicationID; got != "app-id" {
+			t.Errorf("MoesifApplicationID = %q, want %q", got, "app-id")
+		}
+		if got := config.GrowthAnalytics.MoesifCollectorBaseURL; got != "https://api.moesif.net" {
+			t.Errorf("MoesifCollectorBaseURL = %q, want https://api.moesif.net", got)
+		}
+	})
+
+	t.Run("whitespace-only is unset", func(t *testing.T) {
+		t.Setenv("MOESIF_APPLICATION_ID", "   ")
+		loadEnvs()
+		if got := config.GrowthAnalytics.MoesifApplicationID; got != "" {
+			t.Errorf("MoesifApplicationID = %q, want empty", got)
+		}
+		if got := config.GrowthAnalytics.MoesifCollectorBaseURL; got != "" {
+			t.Errorf("MoesifCollectorBaseURL = %q, want empty (tracking off)", got)
+		}
+	})
+}
+
+func TestGrowthAnalyticsAuthMode(t *testing.T) {
+	if got := growthAnalyticsAuthMode(GrowthAnalyticsConfig{MoesifApplicationID: "secret"}); got != "moesif-application-id" {
+		t.Errorf("with ID = %q, want moesif-application-id", got)
+	}
+	if got := growthAnalyticsAuthMode(GrowthAnalyticsConfig{}); got != "caller-jwt" {
+		t.Errorf("without ID = %q, want caller-jwt", got)
 	}
 }

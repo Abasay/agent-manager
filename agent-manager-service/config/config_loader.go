@@ -598,7 +598,7 @@ func logGrowthAnalyticsState(ga GrowthAnalyticsConfig, alreadyWarned bool) {
 	case !ga.Enabled:
 		slog.Info("growthanalytics: feature-usage tracking disabled (MOESIF_ENABLED is false)")
 	case ga.MoesifCollectorBaseURL == "":
-		slog.Info("growthanalytics: feature-usage tracking disabled (MOESIF_COLLECTOR_BASE_URL is unset)")
+		slog.Info("growthanalytics: feature-usage tracking disabled (neither MOESIF_APPLICATION_ID nor MOESIF_COLLECTOR_BASE_URL is set)")
 	default:
 		slog.Info("growthanalytics: feature-usage tracking enabled",
 			"collector", ga.MoesifCollectorBaseURL,

@@ -30,8 +30,9 @@ import (
 	"github.com/wso2/agent-manager/agent-manager-service/clients/requests"
 )
 
-// Event is a single API-call event, in the shape the moesif-collector-api's
-// POST /v1/events operation expects. Metadata must stay top-level (a sibling
+// Event is a single API-call event, in the shape Moesif's Events API
+// (POST /v1/events) expects, whether sent directly or through a collector
+// proxy such as moesif-collector-api. Metadata must stay top-level (a sibling
 // of Request/Response) — nesting it inside Request silently fails to
 // populate Moesif's Metadata panel.
 type Event struct {
@@ -100,7 +101,8 @@ type Client struct {
 //     when reached directly inside the OpenChoreo data plane, or
 //     "http://localhost:18080/moesif-collector" for local dev through a
 //     `kubectl port-forward` of the internal gateway.
-//   - token is a bearer JWT issued by platform-idp. It's short-lived (~1h);
+//   - token is the caller's bearer JWT, used only when applicationID is empty
+//     (proxy mode); it may be empty otherwise. It's short-lived (~1h);
 //     the caller is responsible for keeping it fresh — this client does not
 //     retry on expiry.
 //   - hostHeader, if non-empty, overrides the outgoing Host header. Required

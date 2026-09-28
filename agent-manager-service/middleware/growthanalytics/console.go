@@ -395,6 +395,9 @@ func ReportConsoleActions(
 	// Captured once: the goroutine must release the same semaphore it
 	// acquired, even if the package variable is swapped in the meantime (as
 	// tests do to isolate their slot counts).
+	// The sender is built before the slot is taken so a panic building it can
+	// never leak a slot.
+	sender := newConsoleSender(ga, token)
 	slots := consoleSendSlots
 	select {
 	case slots <- struct{}{}:
@@ -404,7 +407,6 @@ func ReportConsoleActions(
 		return
 	}
 
-	sender := newConsoleSender(ga, token)
 	// context.WithoutCancel: the request context is cancelled the moment the
 	// 202 is written, which is before this send would otherwise finish.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(requestCtx), consoleActionSendTimeout)

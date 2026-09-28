@@ -118,10 +118,13 @@ spec:
                   key: github-token
                   {{- end }}
             {{- with .Values.agentManagerService.config.growthAnalytics }}
-            {{- if or .applicationId .existingSecret }}
+            {{- if and .enabled (or .applicationId .existingSecret) }}
             - name: MOESIF_APPLICATION_ID
               valueFrom:
                 secretKeyRef:
+                  # optional: a missing or misnamed analytics Secret must not
+                  # stop the API from starting; tracking just stays off.
+                  optional: true
                   {{- if .existingSecret }}
                   name: {{ .existingSecret }}
                   key: {{ .existingSecretKey | default "moesif-application-id" }}

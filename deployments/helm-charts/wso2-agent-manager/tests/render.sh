@@ -436,6 +436,56 @@ else
   FAILURES=$((FAILURES + 1))
 fi
 
+# Growth analytics (Moesif) is off unless enabled, and the Application ID is a
+# credential: it must reach the pod only from a Secret, never the ConfigMap,
+# and a misnamed Secret must not stop the API from starting.
+GA=agentManagerService.config.growthAnalytics
+SECRET_TMPL=templates/agent-manager-service/secret.yaml
+CM_TMPL=templates/agent-manager-service/configmap.yaml
+
+assert_cm "analytics is off by default" MOESIF_ENABLED "false"
+assert_cm "console analytics is off by default" CONSOLE_ANALYTICS_ENABLED "false"
+assert_cm "deployment model defaults to on-prem" AMP_DEPLOYMENT_MODEL "on-prem"
+assert_cm "enabled reaches the ConfigMap" MOESIF_ENABLED "true" --set $GA.enabled=true
+
+# assert_render <label> <template> <want: present|absent> <pattern> [helm --set args...]
+assert_render() {
+  local label="$1" tmpl="$2" want="$3" pattern="$4" rendered
+  shift 4
+  if ! rendered="$(helm template test-release "$CHART_DIR" --show-only "$tmpl" "$@" 2>&1)"; then
+    printf 'FAIL - %s: helm template failed: %s\n' "$label" "$rendered"
+    FAILURES=$((FAILURES + 1))
+    return
+  fi
+  local found=absent
+  grep -qE -- "$pattern" <<<"$rendered" && found=present
+  if [[ "$found" == "$want" ]]; then
+    printf 'ok   - %s\n' "$label"
+  else
+    printf 'FAIL - %s\n      expected %s to be %s\n' "$label" "$pattern" "$want"
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+assert_render "no Application ID env by default" "$API_TMPL" absent 'name: MOESIF_APPLICATION_ID'
+assert_render "no Application ID env while analytics is disabled" "$API_TMPL" absent \
+  'name: MOESIF_APPLICATION_ID' --set $GA.existingSecret=moesif-ext
+assert_render "an inline Application ID is stored in the chart Secret" "$SECRET_TMPL" present \
+  'moesif-application-id: "app-id-123"' --set $GA.applicationId=app-id-123
+assert_render "an inline Application ID never reaches the ConfigMap" "$CM_TMPL" absent \
+  'app-id-123' --set $GA.enabled=true --set $GA.applicationId=app-id-123
+assert_render "existingSecret suppresses the chart Secret key" "$SECRET_TMPL" absent \
+  'moesif-application-id:' --set $GA.applicationId=app-id-123 --set $GA.existingSecret=moesif-ext
+assert_render "the Application ID Secret reference is optional" "$API_TMPL" present \
+  'optional: true' --set $GA.enabled=true --set $GA.existingSecret=moesif-ext
+assert_secret_ref "existingSecret names the Application ID Secret" "$API_TMPL" \
+  MOESIF_APPLICATION_ID name moesif-ext --set $GA.enabled=true --set $GA.existingSecret=moesif-ext
+assert_secret_ref "existingSecretKey selects the key" "$API_TMPL" \
+  MOESIF_APPLICATION_ID key custom-key --set $GA.enabled=true --set $GA.existingSecret=moesif-ext \
+  --set $GA.existingSecretKey=custom-key
+assert_secret_ref "an inline Application ID is read from the chart Secret" "$API_TMPL" \
+  MOESIF_APPLICATION_ID key moesif-application-id --set $GA.enabled=true --set $GA.applicationId=app-id-123
+
 if ((FAILURES > 0)); then
   printf '\n%d assertion(s) failed\n' "$FAILURES"
   exit 1

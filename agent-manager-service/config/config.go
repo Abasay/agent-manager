@@ -341,12 +341,12 @@ type GrowthAnalyticsConfig struct {
 	// ConsoleEnabled and MoesifCollectorBaseURL all set. MOESIF_ENABLED=false
 	// still means "this deployment reports nothing to Moesif".
 	ConsoleEnabled bool
-	// MoesifCollectorBaseURL is the proxy's base URL, e.g.
-	// "http://<collector-host>:<port>/<collector-path>"
-	// in-cluster, or "http://localhost:18080/moesif-collector" for local dev
-	// through a `kubectl port-forward` of the internal gateway. Empty
-	// disables telemetry export entirely — the middleware/growthanalytics
-	// package no-ops when this is unset.
+	// MoesifCollectorBaseURL is where events are POSTed: a collector proxy
+	// (e.g. "http://<collector-host>:<port>/<collector-path>", or
+	// "http://localhost:18080/moesif-collector" through a port-forward) or
+	// Moesif itself. When MoesifApplicationID is set and this is empty, the
+	// loader defaults it to https://api.moesif.net. Empty after loading
+	// disables telemetry export; middleware/growthanalytics no-ops.
 	MoesifCollectorBaseURL string
 	// MoesifCollectorHostHeader overrides the outgoing Host header sent to
 	// the proxy. Required only for local dev through a port-forward, where

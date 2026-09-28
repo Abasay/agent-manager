@@ -403,6 +403,30 @@ func TestReportConsoleActionsWithoutTokenDropsBatch(t *testing.T) {
 	}
 }
 
+// TestReportConsoleActionsApplicationIDModeSendsWithoutToken: with an
+// Application ID the caller JWT is not the credential, so its absence must
+// not drop the batch.
+func TestReportConsoleActionsApplicationIDModeSendsWithoutToken(t *testing.T) {
+	fake := &fakeActionSender{done: make(chan struct{})}
+	original := newConsoleSender
+	newConsoleSender = func(config.GrowthAnalyticsConfig, string) consoleActionSender { return fake }
+	t.Cleanup(func() { newConsoleSender = original })
+
+	ga := consoleTestConfig()
+	ga.MoesifApplicationID = "app-id"
+	actions, _ := BuildConsoleActions(
+		[]ConsoleActionInput{{Action: "amp.console.navigation.page-view"}},
+		testConsoleContext(), ga)
+
+	ReportConsoleActions(context.Background(), ga, "", actions)
+
+	select {
+	case <-fake.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("batch was dropped in Application ID mode")
+	}
+}
+
 // TestConsoleTaxonomyIsDisjointFromEndpointCodes enforces the design rule that
 // console actions never duplicate an endpoint feature code: an action exists
 // here only because the API cannot observe it.

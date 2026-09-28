@@ -313,7 +313,8 @@ agentManagerService:
       enabled: false
       # Console UI action stream; also needs enabled (CONSOLE_ANALYTICS_ENABLED).
       consoleEnabled: false
-      # Where events are sent. Leave empty with an application ID to send
+      # Events endpoint base URL (a collector proxy or Moesif itself). Leave
+      # empty with an application ID to send
       # straight to https://api.moesif.net; must be https for a remote host
       # when an application ID is set.
       collectorBaseURL: ""
