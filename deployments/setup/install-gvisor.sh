@@ -110,39 +110,67 @@ fi
 # --- Configure containerd ---
 CONTAINERD_CONFIG="/etc/containerd/config.toml"
 
-if [ -f "$CONTAINERD_CONFIG" ] && grep -q "runsc" "$CONTAINERD_CONFIG" 2>/dev/null; then
+if [ ! -f "$CONTAINERD_CONFIG" ]; then
+    mkdir -p "$(dirname "$CONTAINERD_CONFIG")"
+    containerd config default > "$CONTAINERD_CONFIG"
+    echo "   ✅ Generated default containerd config"
+fi
+
+# The CRI runtimes table has a different plugin ID per config version, and
+# containerd silently ignores the wrong one (it only logs "Ignoring unknown key"):
+#   version = 3 (containerd 2.x):  plugins."io.containerd.cri.v1.runtime"
+#   version = 2 (containerd 1.x, or 2.x migrating a v2 file):  plugins."io.containerd.grpc.v1.cri"
+CONFIG_VERSION="$(awk -F= '/^version[[:space:]]*=/ { gsub(/[[:space:]"]/, "", $2); print $2; exit }' "$CONTAINERD_CONFIG")"
+case "$CONFIG_VERSION" in
+    3) CRI_PLUGIN="io.containerd.cri.v1.runtime"; OTHER_CRI_PLUGIN="io.containerd.grpc.v1.cri" ;;
+    2) CRI_PLUGIN="io.containerd.grpc.v1.cri";    OTHER_CRI_PLUGIN="io.containerd.cri.v1.runtime" ;;
+    *)
+        echo "❌ Unexpected containerd config version '${CONFIG_VERSION:-<none>}' in ${CONTAINERD_CONFIG}."
+        echo "   Expected 'version = 3' (containerd 2.x) or 'version = 2' (containerd 1.x)."
+        echo "   Not adding a runtime block: under the wrong plugin table containerd ignores it."
+        exit 1
+        ;;
+esac
+echo "   Config:     ${CONTAINERD_CONFIG} (version ${CONFIG_VERSION}, plugin ${CRI_PLUGIN})"
+
+# True if the config defines the runsc runtime under the given plugin table.
+has_runsc_table() {
+    grep -F -e "[plugins.\"$1\".containerd.runtimes.runsc]" \
+            -e "[plugins.'$1'.containerd.runtimes.runsc]" "$CONTAINERD_CONFIG" >/dev/null 2>&1
+}
+
+# Only a block under the table this config version reads counts as configured.
+# A block under the other table (e.g. left by an earlier version of this script)
+# is dead config; skipping on it would leave an already-broken node broken.
+if has_runsc_table "$CRI_PLUGIN"; then
     echo "✅ containerd already configured for runsc — skipping"
 else
+    if has_runsc_table "$OTHER_CRI_PLUGIN"; then
+        echo "   ⚠️  ${CONTAINERD_CONFIG} defines runsc under plugins.\"${OTHER_CRI_PLUGIN}\","
+        echo "       which containerd ignores at config version ${CONFIG_VERSION}. Leaving it in place"
+        echo "       and adding the runtime under plugins.\"${CRI_PLUGIN}\"; remove the stale block by hand."
+    fi
     echo "⚙️  Adding runsc runtime to containerd config (${CONTAINERD_CONFIG})..."
 
-    if [ ! -f "$CONTAINERD_CONFIG" ]; then
-        # Generate a default config if none exists (common on fresh nodes)
-        mkdir -p "$(dirname "$CONTAINERD_CONFIG")"
-        containerd config default > "$CONTAINERD_CONFIG"
-        echo "   ✅ Generated default containerd config"
-    fi
-
-    # Append the runsc runtime block.
-    # Both containerd v1.x and v2.x honour the grpc.v1.cri plugin config path.
     if [ "$GVISOR_NETWORK_HOST" = "true" ]; then
-        cat >> "$CONTAINERD_CONFIG" <<'EOF'
+        cat >> "$CONTAINERD_CONFIG" <<BLOCK
 
 # gVisor (runsc) runtime — added by install-gvisor.sh (host-network passthrough)
-[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
+[plugins."${CRI_PLUGIN}".containerd.runtimes.runsc]
   runtime_type = "io.containerd.runsc.v1"
-  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc.options]
+  [plugins."${CRI_PLUGIN}".containerd.runtimes.runsc.options]
     TypeUrl = "io.containerd.runsc.v1.options"
     ConfigPath = "/etc/containerd/runsc.toml"
-EOF
+BLOCK
         printf '[runsc_config]\n  network = "host"\n' > /etc/containerd/runsc.toml
         echo "   ✅ containerd config updated (runsc --network=host)"
     else
-        cat >> "$CONTAINERD_CONFIG" <<'EOF'
+        cat >> "$CONTAINERD_CONFIG" <<BLOCK
 
 # gVisor (runsc) runtime — added by install-gvisor.sh
-[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
+[plugins."${CRI_PLUGIN}".containerd.runtimes.runsc]
   runtime_type = "io.containerd.runsc.v1"
-EOF
+BLOCK
         echo "   ✅ containerd config updated"
     fi
 fi
@@ -152,17 +180,37 @@ fi
 echo "🔄 Restarting containerd to load the new runtime..."
 systemctl restart containerd
 
-# Give containerd a moment to finish loading plugins
-sleep 5
 
-# Verify the shim is available (crictl is present on kubeadm/EKS/GKE/AKS nodes)
+# A runtime block containerd ignores still leaves the node Ready, so this is the
+# only check that catches it
 if command -v crictl &>/dev/null; then
-    if crictl info 2>/dev/null | grep -q "runsc"; then
-        echo "   ✅ runsc runtime registered in containerd"
-    else
-        echo "   ⚠️  crictl info did not show runsc yet — containerd may still be loading plugins."
-        echo "       Wait a few seconds and re-check: crictl info | grep runsc"
+    CRICTL=(crictl --runtime-endpoint unix:///run/containerd/containerd.sock)
+    REGISTERED=false
+    for _ in $(seq 1 30); do
+        # grep without -q: an early exit would SIGPIPE crictl and fail the pipe under pipefail.
+        if "${CRICTL[@]}" info 2>/dev/null | grep "runsc" >/dev/null; then
+            REGISTERED=true
+            break
+        fi
+        sleep 2
+    done
+    if [ "$REGISTERED" != "true" ]; then
+        echo "❌ containerd did not register the runsc runtime after restarting."
+        echo "   gVisor pods on this node would fail with: no runtime for \"runsc\" is configured"
+        IGNORED="$(journalctl -u containerd --since "-10min" --no-pager 2>/dev/null \
+            | grep "unknown key" | grep "runsc" | tail -3 || true)"
+        if [ -n "$IGNORED" ]; then
+            echo "   containerd ignored the runtime block:"
+            printf '%s\n' "$IGNORED" | sed 's/^/     /'
+        fi
+        echo "   Inspect: ${CRICTL[*]} info | grep -A3 runsc"
+        echo "            grep -B1 -A3 runsc ${CONTAINERD_CONFIG}"
+        exit 1
     fi
+    echo "   ✅ runsc runtime registered in containerd"
+else
+    echo "   ⚠️  crictl not found — could not confirm containerd registered runsc."
+    echo "       Confirm by running a pod that sets runtimeClassName: gvisor on this node."
 fi
 
 echo ""
