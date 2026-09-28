@@ -50,12 +50,10 @@ class Config:
                     "USE_LLM_PROVIDER is true but LLM_PROVIDER_KEY is not set"
                 )
 
-        # AM injects <PROXY>_URL and <PROXY>_API_KEY when an MCP proxy named
-        # "GitHub" is attached to the agent. Same shape as the LLM provider pair
-        # above: system-managed, per environment, read-only in the console.
+
         use_mcp = _env("USE_MCP", "false").lower() == "true"
-        mcp_url = _env("GITHUB_URL", "")
-        mcp_api_key = _env("GITHUB_API_KEY", "")
+        mcp_url = _env("GITHUB_MCP_URL", "")
+        mcp_api_key = _env("GITHUB_MCP_API_KEY", "")
 
         # Which repository holds the IT team's known-issue tracker. Without this the
         # agent would search issues across the whole of GitHub, which is both slow
@@ -64,9 +62,9 @@ class Config:
 
         if use_mcp:
             if not mcp_url:
-                raise RuntimeError("USE_MCP is true but GITHUB_URL is not set")
+                raise RuntimeError("USE_MCP is true but GITHUB_MCP_URL is not set")
             if not mcp_api_key:
-                raise RuntimeError("USE_MCP is true but GITHUB_API_KEY is not set")
+                raise RuntimeError("USE_MCP is true but GITHUB_MCP_API_KEY is not set")
             if not issue_tracker_repo:
                 raise RuntimeError(
                     "USE_MCP is true but ISSUE_TRACKER_REPO is not set "
