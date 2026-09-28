@@ -15,6 +15,8 @@ class TraceloopProvider:
             # removed the `module=` kwarg that opentelemetry-instrumentation-*
             # 0.61.0 still calls.
             "wrapt<2.0.0",
+            # Mirrors requirements.in: traceloop-sdk imports requests undeclared.
+            "requests",
             "opentelemetry-sdk",
             "opentelemetry-api",
         ]
