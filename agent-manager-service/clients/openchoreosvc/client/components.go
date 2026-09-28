@@ -50,12 +50,18 @@ func (c *openChoreoClient) CreateComponent(ctx context.Context, ouID, projectNam
 	}
 
 	if resp.StatusCode() != http.StatusCreated {
-		return handleErrorResponse(resp.StatusCode(), ErrorResponses{
+		return terminatingConflict(handleErrorResponse(resp.StatusCode(), ErrorResponses{
 			JSON400: resp.JSON400,
 			JSON401: resp.JSON401,
 			JSON403: resp.JSON403,
 			JSON409: resp.JSON409,
 			JSON500: resp.JSON500,
+		}), "component", req.Name, func() (*gen.ObjectMeta, error) {
+			getResp, getErr := c.ocClient.GetComponentWithResponse(ctx, namespaceName, req.Name)
+			if getErr != nil || getResp.JSON200 == nil {
+				return nil, getErr
+			}
+			return &getResp.JSON200.Metadata, nil
 		})
 	}
 	return nil
