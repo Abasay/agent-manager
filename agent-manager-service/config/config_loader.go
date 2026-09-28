@@ -165,6 +165,7 @@ func loadEnvs() {
 		ConsoleEnabled:            r.readOptionalBool("CONSOLE_ANALYTICS_ENABLED", false),
 		MoesifCollectorBaseURL:    r.readOptionalString("MOESIF_COLLECTOR_BASE_URL", ""),
 		MoesifCollectorHostHeader: r.readOptionalString("MOESIF_COLLECTOR_HOST_HEADER", ""),
+		MoesifApplicationID:       strings.TrimSpace(r.readOptionalString("MOESIF_APPLICATION_ID", "")),
 		DeploymentModel:           r.readOptionalString("AMP_DEPLOYMENT_MODEL", "on-prem"),
 		Environment:               r.readOptionalString("AMP_ENVIRONMENT", ""),
 	}
@@ -535,6 +536,12 @@ func validateGrowthAnalyticsConfig(cfg *Config) {
 		warned = true
 	}
 
+	// With an Application ID the obvious target is Moesif itself, so an
+	// unset URL means "send straight to Moesif" rather than "disabled".
+	if cfg.GrowthAnalytics.MoesifApplicationID != "" && cfg.GrowthAnalytics.MoesifCollectorBaseURL == "" {
+		cfg.GrowthAnalytics.MoesifCollectorBaseURL = defaultMoesifAPIBaseURL
+	}
+
 	switch cfg.GrowthAnalytics.MoesifCollectorBaseURL {
 	case "":
 		if cfg.GrowthAnalytics.MoesifCollectorHostHeader != "" {
@@ -554,10 +561,29 @@ func validateGrowthAnalyticsConfig(cfg *Config) {
 		case u.Host == "":
 			disable("MOESIF_COLLECTOR_BASE_URL must have a non-empty host",
 				"url", cfg.GrowthAnalytics.MoesifCollectorBaseURL)
+		case cfg.GrowthAnalytics.MoesifApplicationID != "" && u.Scheme != "https" && !isLoopbackHost(u.Hostname()):
+			// The Application ID is a credential; never send it in cleartext
+			// beyond this machine.
+			disable("MOESIF_COLLECTOR_BASE_URL must use https when MOESIF_APPLICATION_ID is set",
+				"url", cfg.GrowthAnalytics.MoesifCollectorBaseURL)
 		}
 	}
 
 	logGrowthAnalyticsState(cfg.GrowthAnalytics, warned)
+}
+
+// defaultMoesifAPIBaseURL is Moesif's public collection API, used when an
+// Application ID is configured without a collector URL.
+const defaultMoesifAPIBaseURL = "https://api.moesif.net"
+
+// isLoopbackHost reports whether host is localhost or a loopback IP, the only
+// places an Application ID may be sent over plain http (local proxies, tests).
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // logGrowthAnalyticsState records, once at startup, whether feature-usage
@@ -576,6 +602,7 @@ func logGrowthAnalyticsState(ga GrowthAnalyticsConfig, alreadyWarned bool) {
 	default:
 		slog.Info("growthanalytics: feature-usage tracking enabled",
 			"collector", ga.MoesifCollectorBaseURL,
+			"auth", growthAnalyticsAuthMode(ga),
 			"environment", ga.Environment,
 			"deploymentModel", ga.DeploymentModel,
 			"consoleActions", ga.ConsoleEnabled)
@@ -584,6 +611,14 @@ func logGrowthAnalyticsState(ga GrowthAnalyticsConfig, alreadyWarned bool) {
 				"endpoint feature-usage events are unaffected")
 		}
 	}
+}
+
+// growthAnalyticsAuthMode names the credential in use without revealing it.
+func growthAnalyticsAuthMode(ga GrowthAnalyticsConfig) string {
+	if ga.MoesifApplicationID != "" {
+		return "moesif-application-id"
+	}
+	return "caller-jwt"
 }
 
 func validateInternalServerConfigs(cfg *Config, r *configReader) {

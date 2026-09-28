@@ -649,6 +649,7 @@ func TestValidateGrowthAnalyticsConfig(t *testing.T) {
 		name        string
 		baseURL     string
 		hostHeader  string
+		appID       string
 		wantBaseURL string // "" means tracking ends up disabled
 	}{
 		{
@@ -686,6 +687,29 @@ func TestValidateGrowthAnalyticsConfig(t *testing.T) {
 			baseURL:     "http://[::1",
 			wantBaseURL: "",
 		},
+		{
+			name:        "application ID without a URL defaults to the Moesif API",
+			appID:       "app-id",
+			wantBaseURL: "https://api.moesif.net",
+		},
+		{
+			name:        "application ID with a customer https proxy is kept",
+			baseURL:     "https://moesif-proxy.example.com",
+			appID:       "app-id",
+			wantBaseURL: "https://moesif-proxy.example.com",
+		},
+		{
+			name:        "application ID over plain http to a remote host disables tracking",
+			baseURL:     "http://moesif-proxy.example.com",
+			appID:       "app-id",
+			wantBaseURL: "",
+		},
+		{
+			name:        "application ID over plain http to localhost is kept",
+			baseURL:     "http://localhost:9090",
+			appID:       "app-id",
+			wantBaseURL: "http://localhost:9090",
+		},
 	}
 
 	for _, tc := range tests {
@@ -693,6 +717,7 @@ func TestValidateGrowthAnalyticsConfig(t *testing.T) {
 			cfg := &Config{GrowthAnalytics: GrowthAnalyticsConfig{
 				MoesifCollectorBaseURL:    tc.baseURL,
 				MoesifCollectorHostHeader: tc.hostHeader,
+				MoesifApplicationID:       tc.appID,
 			}}
 
 			validateGrowthAnalyticsConfig(cfg)

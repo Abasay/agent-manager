@@ -712,3 +712,22 @@ func TestRequestURI_StripsQueryAndIgnoresBogusProto(t *testing.T) {
 		t.Errorf("requestURI() = %q, want %q", got, want)
 	}
 }
+
+// TestTrack_ApplicationIDMode_SendsWithoutCallerJWT: with an Application ID the
+// caller's token is not the credential, so its absence must not drop the event.
+func TestTrack_ApplicationIDMode_SendsWithoutCallerJWT(t *testing.T) {
+	withGrowthAnalyticsConfigFull(t, config.GrowthAnalyticsConfig{
+		Enabled:                true,
+		MoesifCollectorBaseURL: "https://api.moesif.net",
+		MoesifApplicationID:    "app-id",
+		DeploymentModel:        "on-prem",
+	})
+	fs, _ := withFakeSender(t)
+
+	tracked := Track("amp.agent-development.create-agent", nil, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})
+	tracked(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/agents", nil)) // no caller JWT
+
+	waitForEvent(t, fs)
+}

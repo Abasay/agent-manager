@@ -359,7 +359,7 @@ func sanitizeURI(raw string) string {
 // newConsoleSender builds the sender used to forward a batch. A package var so
 // tests can substitute a fake, mirroring newSender in track.go.
 var newConsoleSender = func(ga config.GrowthAnalyticsConfig, token string) consoleActionSender {
-	return moesifcollector.NewClient(sharedHTTPClient, ga.MoesifCollectorBaseURL, token, ga.MoesifCollectorHostHeader)
+	return moesifcollector.NewClient(sharedHTTPClient, ga.MoesifCollectorBaseURL, token, ga.MoesifCollectorHostHeader, ga.MoesifApplicationID)
 }
 
 type consoleActionSender interface {
@@ -383,7 +383,7 @@ func ReportConsoleActions(
 	if len(actions) == 0 {
 		return
 	}
-	if token == "" {
+	if token == "" && ga.MoesifApplicationID == "" {
 		slog.Error("growthanalytics: no caller JWT on console telemetry request, dropping batch",
 			"actions", len(actions))
 		return

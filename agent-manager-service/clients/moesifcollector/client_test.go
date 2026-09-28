@@ -57,6 +57,7 @@ type captured struct {
 	path       string
 	host       string
 	authHeader string
+	appID      string
 	body       map[string]interface{}
 }
 
@@ -70,6 +71,7 @@ func newFakeCollector(t *testing.T, status int) (*httptest.Server, *captured) {
 		got.path = r.URL.Path
 		got.host = r.Host
 		got.authHeader = r.Header.Get("Authorization")
+		got.appID = r.Header.Get("X-Moesif-Application-Id")
 		if err := json.NewDecoder(r.Body).Decode(&got.body); err != nil {
 			t.Errorf("collector: decoding request body: %v", err)
 		}
@@ -81,7 +83,7 @@ func newFakeCollector(t *testing.T, status int) (*httptest.Server, *captured) {
 
 func newTestClient(baseURL, token, hostHeader string) *Client {
 	return NewClient(requests.NewRetryableHTTPClient(&http.Client{Timeout: 5 * time.Second}),
-		baseURL, token, hostHeader)
+		baseURL, token, hostHeader, "")
 }
 
 // TestSendEvent_PostsToEventsPathWithBearerToken pins the two things the
@@ -242,8 +244,46 @@ func TestSendEvent_UnreachableCollectorIsAnError(t *testing.T) {
 	baseURL := srv.URL
 	srv.Close() // nothing is listening now
 
-	c := NewClient(&http.Client{Timeout: 5 * time.Second}, baseURL, "caller-jwt", "")
+	c := NewClient(&http.Client{Timeout: 5 * time.Second}, baseURL, "caller-jwt", "", "")
 	if err := c.SendEvent(context.Background(), sampleEvent()); err == nil {
 		t.Error("SendEvent() to an unreachable collector: error = nil, want non-nil")
+	}
+}
+
+// TestSendEvent_ApplicationIDReplacesBearerToken: with an Application ID the
+// client authenticates the way Moesif's own API expects, and the caller's JWT
+// never leaves the service.
+func TestSendEvent_ApplicationIDReplacesBearerToken(t *testing.T) {
+	srv, got := newFakeCollector(t, http.StatusOK)
+
+	c := NewClient(&http.Client{Timeout: 5 * time.Second}, srv.URL, "caller-jwt", "", "app-id-123")
+	if err := c.SendEvent(context.Background(), sampleEvent()); err != nil {
+		t.Fatalf("SendEvent() error = %v, want nil", err)
+	}
+
+	if got.appID != "app-id-123" {
+		t.Errorf("X-Moesif-Application-Id = %q, want %q", got.appID, "app-id-123")
+	}
+	if got.authHeader != "" {
+		t.Errorf("Authorization = %q, want empty (caller JWT must not be sent with an Application ID)", got.authHeader)
+	}
+}
+
+func TestSendActions_ApplicationIDReplacesBearerToken(t *testing.T) {
+	var appID, auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		appID = r.Header.Get("X-Moesif-Application-Id")
+		auth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClient(&http.Client{Timeout: 5 * time.Second}, srv.URL, "caller-jwt", "", "app-id-123")
+	actions := []Action{{ActionName: "amp.console.navigation.page-view", Request: ActionRequest{Time: "t", URI: "/"}}}
+	if err := c.SendActions(context.Background(), actions); err != nil {
+		t.Fatalf("SendActions() error = %v, want nil", err)
+	}
+	if appID != "app-id-123" || auth != "" {
+		t.Errorf("headers: X-Moesif-Application-Id=%q Authorization=%q, want app-id-123 and empty", appID, auth)
 	}
 }

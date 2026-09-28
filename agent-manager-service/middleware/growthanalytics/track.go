@@ -23,22 +23,17 @@
 // Track, all of which are mutating (POST/PUT/PATCH/DELETE); read paths are
 // deliberately not tracked.
 //
-// Events are posted directly to Moesif's Events API
-// (POST /v1/events) through moesif-collector-api, an authenticated
-// OpenChoreo reverse-proxy component that validates a platform-idp JWT and
-// injects the real Moesif Application ID server-side — this package never
-// handles that credential (see clients/moesifcollector). Earlier this went
-// through the Moesif SDK directly; that's no longer available from this
-// deployment, hence the proxy.
+// Events are posted to Moesif's Events API (POST /v1/events) in one of two
+// ways (see clients/moesifcollector):
 //
-// Authentication to the proxy is delegated, not configured: each event is
-// sent using the bearer JWT already on the request being tracked (the same
-// token the caller authenticated to this service with), not a static
-// credential read from config. The proxy only checks that a token's issuer
-// is platform-idp — no scope or audience check — so the caller's own token
-// is already sufficient. This means there is no shared secret to provision,
-// rotate, or leak for this feature, and every event is naturally
-// attributable to the real caller.
+//   - With MOESIF_APPLICATION_ID set, straight to Moesif (or a proxy the
+//     deployment runs) using the X-Moesif-Application-Id header. This is how
+//     an install reports to its own Moesif account.
+//   - Without it, through a collector proxy that accepts the caller's own
+//     bearer JWT from the request being tracked and injects the Application
+//     ID server-side, as WSO2 Cloud's moesif-collector-api does. No shared
+//     secret exists in that mode, and every event is attributable to the
+//     real caller.
 //
 // Tracking is always fire-and-forget: it must never change a request's
 // outcome or add observable latency to it. The wrapped handler always runs
@@ -172,7 +167,7 @@ var sharedHTTPClient = requests.NewRetryableHTTPClient(&http.Client{Timeout: eve
 // a config credential — see the package doc comment). A package var so
 // tests can substitute a fake in place of the real client.
 var newSender = func(ga config.GrowthAnalyticsConfig, token string) eventSender {
-	return moesifcollector.NewClient(sharedHTTPClient, ga.MoesifCollectorBaseURL, token, ga.MoesifCollectorHostHeader)
+	return moesifcollector.NewClient(sharedHTTPClient, ga.MoesifCollectorBaseURL, token, ga.MoesifCollectorHostHeader, ga.MoesifApplicationID)
 }
 
 // Track wraps handler so calls to it are reported to Moesif as the given
@@ -247,8 +242,8 @@ func reportEvent(
 		}
 	}()
 
-	if token == "" {
-		// Every route Track wraps requires authentication, so this means the
+	if token == "" && ga.MoesifApplicationID == "" {
+		// Only the proxy mode needs the caller's token. Every route Track wraps requires authentication, so this means the
 		// caller's JWT didn't make it onto the request context — a bug
 		// upstream, not a normal unauthenticated request. Drop the event
 		// rather than send it to the proxy with no Authorization header.

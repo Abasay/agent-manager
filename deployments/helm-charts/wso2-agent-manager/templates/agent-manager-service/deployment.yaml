@@ -117,6 +117,20 @@ spec:
                   name: {{ include "agent-management-platform.agentManagerService.fullname" . }}
                   key: github-token
                   {{- end }}
+            {{- with .Values.agentManagerService.config.growthAnalytics }}
+            {{- if or .applicationId .existingSecret }}
+            - name: MOESIF_APPLICATION_ID
+              valueFrom:
+                secretKeyRef:
+                  {{- if .existingSecret }}
+                  name: {{ .existingSecret }}
+                  key: {{ .existingSecretKey | default "moesif-application-id" }}
+                  {{- else }}
+                  name: {{ include "agent-management-platform.agentManagerService.fullname" $ }}
+                  key: moesif-application-id
+                  {{- end }}
+            {{- end }}
+            {{- end }}
             {{- if or .Values.agentManagerService.config.openbao.token .Values.agentManagerService.config.openbao.existingSecret }}
             - name: OPENBAO_TOKEN
               valueFrom:

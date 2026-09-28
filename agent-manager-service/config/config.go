@@ -313,13 +313,14 @@ type ObserverConfig struct {
 	PublicURL string
 }
 
-// GrowthAnalyticsConfig configures feature-usage telemetry export via the
-// moesif-collector-api OpenChoreo proxy component, which authenticates
-// callers with a platform-idp JWT and forwards to Moesif, injecting the real
-// Moesif Application ID server-side (callers never see it). There is no
-// credential here: middleware/growthanalytics authenticates each event to
-// the proxy using the JWT already on the request being tracked (the same
-// token the caller authenticated to this service with), not a config value.
+// GrowthAnalyticsConfig configures feature-usage telemetry export to Moesif.
+// Two ways to authenticate:
+//   - MoesifApplicationID set: events go to MoesifCollectorBaseURL (default
+//     https://api.moesif.net) with the X-Moesif-Application-Id header. This is
+//     how a deployment reports to its own Moesif account or proxy.
+//   - MoesifApplicationID empty: events go to a collector proxy that accepts
+//     the caller's own bearer JWT (the one already on the tracked request) and
+//     injects the Application ID server-side, as WSO2 Cloud's proxy does.
 type GrowthAnalyticsConfig struct {
 	// Enabled is the operational on/off switch for telemetry export, held
 	// separately from MoesifCollectorBaseURL so reporting can be turned off
@@ -353,6 +354,10 @@ type GrowthAnalyticsConfig struct {
 	// real virtual-host name. Leave empty when MoesifCollectorBaseURL's own
 	// host is already the real vhost (i.e. reached directly in-cluster).
 	MoesifCollectorHostHeader string
+	// MoesifApplicationID is the Moesif Application ID (MOESIF_APPLICATION_ID).
+	// When set, it replaces the caller's JWT as the credential on every send.
+	// A secret: supply it from a secret store and never log it.
+	MoesifApplicationID string
 	// DeploymentModel is reported as every event's "deployment_model"
 	// metadata field. Defaults to "on-prem"; the cloud deployment sets
 	// AMP_DEPLOYMENT_MODEL=saas so its events are labelled accordingly.

@@ -49,6 +49,8 @@ services:
       - CONSOLE_ANALYTICS_ENABLED=${CONSOLE_ANALYTICS_ENABLED:-false}
       - MOESIF_COLLECTOR_BASE_URL=${MOESIF_COLLECTOR_BASE_URL:-}
       - MOESIF_COLLECTOR_HOST_HEADER=${MOESIF_COLLECTOR_HOST_HEADER:-}
+      # Your Moesif Application ID; with no collector URL, sends to api.moesif.net.
+      - MOESIF_APPLICATION_ID=${MOESIF_APPLICATION_ID:-}
       - AMP_DEPLOYMENT_MODEL=${AMP_DEPLOYMENT_MODEL:-on-prem}
       - AMP_ENVIRONMENT=${AMP_ENVIRONMENT:-}
       # Kubernetes Configuration

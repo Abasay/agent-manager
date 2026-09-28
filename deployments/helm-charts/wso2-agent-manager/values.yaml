@@ -305,6 +305,28 @@ agentManagerService:
       token: ""
       existingSecret: ""
       existingSecretKey: "github-token"
+
+    # Growth analytics: feature-usage events and console actions sent to
+    # Moesif. Off unless enabled is true.
+    growthAnalytics:
+      # Master switch (MOESIF_ENABLED).
+      enabled: false
+      # Console UI action stream; also needs enabled (CONSOLE_ANALYTICS_ENABLED).
+      consoleEnabled: false
+      # Where events are sent. Leave empty with an application ID to send
+      # straight to https://api.moesif.net; must be https for a remote host
+      # when an application ID is set.
+      collectorBaseURL: ""
+      # Host header override, only for proxies reached via a port-forward.
+      collectorHostHeader: ""
+      # Your Moesif Application ID. Set inline, or prefer existingSecret.
+      # When set it replaces the caller's JWT as the credential.
+      applicationId: ""
+      existingSecret: ""
+      existingSecretKey: "moesif-application-id"
+      # Reported on each event as deployment_model / environment.
+      deploymentModel: "on-prem"
+      environment: ""
     
     # OpenChoreo API configuration
     openChoreo:
