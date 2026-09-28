@@ -92,9 +92,11 @@ if docker cp "${SERVER_CONTAINER}:/etc/rancher/k3s/registries.yaml" /tmp/k3d-reg
     echo "   ✅ Registry mirror config copied from server node"
 fi
 
-# --- 3. Install the runsc binary (skip if already present) ---
-if docker exec "${NODE_CONTAINER}" test -f /usr/local/bin/runsc 2>/dev/null; then
-    echo "✅ runsc binary already present on ${NODE_NAME}"
+# --- 3. Install the runsc binaries (skip if already present) ---
+# runsc needs its sidecar binaries in /usr/local/bin/gvisor-bin/ 
+if docker exec "${NODE_CONTAINER}" test -f /usr/local/bin/runsc 2>/dev/null \
+    && docker exec "${NODE_CONTAINER}" test -x /usr/local/bin/gvisor-bin/gvisor_sentry 2>/dev/null; then
+    echo "✅ runsc binaries already present on ${NODE_NAME}"
 else
     ARCH="$(uname -m)"
     case "$ARCH" in
@@ -125,12 +127,15 @@ else
         exit 1
     }
     "${DECOMPRESS[@]}" "${GVISOR_TMP}/${TARBALL}" \
-        | tar -xf - -C "${GVISOR_TMP}" runsc containerd-shim-runsc-v1
+        | tar -xf - -C "${GVISOR_TMP}" runsc containerd-shim-runsc-v1 gvisor-bin
 
     echo "📦 Installing runsc into ${NODE_NAME}..."
     docker exec "${NODE_CONTAINER}" mkdir -p /usr/local/bin
     docker cp "${GVISOR_TMP}/runsc" "${NODE_CONTAINER}:/usr/local/bin/runsc"
     docker cp "${GVISOR_TMP}/containerd-shim-runsc-v1" "${NODE_CONTAINER}:/usr/local/bin/containerd-shim-runsc-v1"
+    # runsc looks for its sidecars in gvisor-bin/ next to itself
+    docker exec "${NODE_CONTAINER}" rm -rf /usr/local/bin/gvisor-bin
+    docker cp "${GVISOR_TMP}/gvisor-bin" "${NODE_CONTAINER}:/usr/local/bin/gvisor-bin"
     rm -rf "${GVISOR_TMP}"
     trap - EXIT
 fi

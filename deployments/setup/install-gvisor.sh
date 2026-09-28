@@ -29,7 +29,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #   - x86_64 or aarch64 (arm64) architecture
 #   - Running containerd (systemctl is-active containerd)
 #   - Internet access to storage.googleapis.com
-#   - zstd or bzip2
+#   - zstd or bzip2 (gVisor releases ship as a compressed tarball)
 #
 # Idempotent: safe to re-run. Already-installed components are skipped.
 
@@ -73,10 +73,20 @@ CONTAINERD_VERSION="$(containerd --version | grep -oE '[0-9]+\.[0-9]+' | head -1
 echo "   containerd: v${CONTAINERD_VERSION}"
 
 # --- Install runsc ---
-if command -v runsc &>/dev/null && runsc --version &>/dev/null 2>&1; then
+
+INSTALL_DIR="/usr/local/bin"
+
+runsc_installed() {
+    command -v runsc &>/dev/null && runsc --version &>/dev/null || return 1
+    if runsc flags 2>&1 | grep -- "-sidecar-usage-policy" >/dev/null; then
+        [ -x "$(dirname "$(command -v runsc)")/gvisor-bin/gvisor_sentry" ] || return 1
+    fi
+}
+
+if runsc_installed; then
     echo "✅ runsc already installed ($(runsc --version 2>&1 | head -1)) — skipping download"
 else
-    # extract the runsc and containerd-shim-runsc-v1 from the tarball
+    # extract runsc, containerd-shim-runsc-v1 and gvisor-bin/ from the tarball
     if command -v zstd &>/dev/null; then
         TARBALL="gvisor.tar.zstd"; DECOMPRESS=(zstd -dc)
     elif command -v bzip2 &>/dev/null; then
@@ -89,7 +99,7 @@ else
     echo "📥 Downloading gVisor release (${GVISOR_ARCH})..."
     BASE="https://storage.googleapis.com/gvisor/releases/release/latest/${GVISOR_ARCH}"
     # Download into a private temp dir (not predictable /tmp paths) and remove it on exit.
-    #the tarball is ~130 MB and /tmp may be RAM-backed.
+    # The tarball is ~130 MB (~330 MB unpacked) and /tmp may be RAM-backed.
     GVISOR_TMP="$(mktemp -d /var/tmp/gvisor.XXXXXX)"
     trap 'rm -rf "${GVISOR_TMP}"' EXIT
     curl -fsSL --retry 3 "${BASE}/${TARBALL}" -o "${GVISOR_TMP}/${TARBALL}"
@@ -100,11 +110,17 @@ else
         exit 1
     }
     "${DECOMPRESS[@]}" "${GVISOR_TMP}/${TARBALL}" \
-        | tar -xf - -C "${GVISOR_TMP}" runsc containerd-shim-runsc-v1
+        | tar -xf - -C "${GVISOR_TMP}" runsc containerd-shim-runsc-v1 gvisor-bin
+    rm -f "${GVISOR_TMP}/${TARBALL}"
+
+    rm -rf "${INSTALL_DIR}/gvisor-bin.new"
+    mv "${GVISOR_TMP}/gvisor-bin" "${INSTALL_DIR}/gvisor-bin.new"
+    rm -rf "${INSTALL_DIR}/gvisor-bin"
+    mv "${INSTALL_DIR}/gvisor-bin.new" "${INSTALL_DIR}/gvisor-bin"
     chmod +x "${GVISOR_TMP}/runsc" "${GVISOR_TMP}/containerd-shim-runsc-v1"
-    mv "${GVISOR_TMP}/runsc" /usr/local/bin/runsc
-    mv "${GVISOR_TMP}/containerd-shim-runsc-v1" /usr/local/bin/containerd-shim-runsc-v1
-    echo "   ✅ runsc $(runsc --version 2>&1 | head -1) installed"
+    mv "${GVISOR_TMP}/runsc" "${INSTALL_DIR}/runsc"
+    mv "${GVISOR_TMP}/containerd-shim-runsc-v1" "${INSTALL_DIR}/containerd-shim-runsc-v1"
+    echo "   ✅ runsc $(runsc --version 2>&1 | head -1) installed, with sidecars in ${INSTALL_DIR}/gvisor-bin/"
 fi
 
 # --- Configure containerd ---
