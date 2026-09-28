@@ -16,7 +16,13 @@
 
 package client
 
-import "github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/gen"
+import (
+	"errors"
+	"fmt"
+
+	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/gen"
+	"github.com/wso2/agent-manager/agent-manager-service/utils"
+)
 
 // isTerminating reports whether a resource has been asked to go away but has not yet
 // left the API.
@@ -33,4 +39,22 @@ import "github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosv
 // guards filters on this, so a delete reads as done the moment OpenChoreo accepts it.
 func isTerminating(meta gen.ObjectMeta) bool {
 	return meta.DeletionTimestamp != nil
+}
+
+// terminatingConflict refines a create conflict. OpenChoreo answers a create with 409
+// both when the name is genuinely taken and when the previous holder of the name has
+// been deleted but is still finalizing — and the latter is invisible to the user,
+// because every list filters it out (see isTerminating). When createErr is a conflict
+// and lookup finds the existing object terminating, the conflict is replaced with
+// ErrResourceBeingDeleted so the caller can say "try again shortly" instead of
+// "already exists". Any other error, or a failed lookup, returns createErr unchanged.
+func terminatingConflict(createErr error, kind, name string, lookup func() (*gen.ObjectMeta, error)) error {
+	if !errors.Is(createErr, utils.ErrConflict) {
+		return createErr
+	}
+	meta, err := lookup()
+	if err != nil || meta == nil || !isTerminating(*meta) {
+		return createErr
+	}
+	return fmt.Errorf("%w: %s %q is still being cleaned up, try again shortly", utils.ErrResourceBeingDeleted, kind, name)
 }

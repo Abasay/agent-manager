@@ -159,12 +159,18 @@ func (c *openChoreoClient) CreateEnvironment(ctx context.Context, ouID string, r
 	}
 
 	if resp.StatusCode() != http.StatusCreated {
-		return nil, handleErrorResponse(resp.StatusCode(), ErrorResponses{
+		return nil, terminatingConflict(handleErrorResponse(resp.StatusCode(), ErrorResponses{
 			JSON400: resp.JSON400,
 			JSON401: resp.JSON401,
 			JSON403: resp.JSON403,
 			JSON409: resp.JSON409,
 			JSON500: resp.JSON500,
+		}), "environment", req.Name, func() (*ocapi.ObjectMeta, error) {
+			getResp, getErr := c.ocClient.GetEnvironmentWithResponse(ctx, namespaceName, req.Name)
+			if getErr != nil || getResp.JSON200 == nil {
+				return nil, getErr
+			}
+			return &getResp.JSON200.Metadata, nil
 		})
 	}
 
@@ -483,12 +489,18 @@ func (c *openChoreoClient) CreateDeploymentPipeline(ctx context.Context, ouID, p
 	}
 
 	if resp.StatusCode() != http.StatusCreated {
-		return nil, handleErrorResponse(resp.StatusCode(), ErrorResponses{
+		return nil, terminatingConflict(handleErrorResponse(resp.StatusCode(), ErrorResponses{
 			JSON400: resp.JSON400,
 			JSON401: resp.JSON401,
 			JSON403: resp.JSON403,
 			JSON409: resp.JSON409,
 			JSON500: resp.JSON500,
+		}), "deployment pipeline", pipelineName, func() (*ocapi.ObjectMeta, error) {
+			getResp, getErr := c.ocClient.GetDeploymentPipelineWithResponse(ctx, namespaceName, pipelineName)
+			if getErr != nil || getResp.JSON200 == nil {
+				return nil, getErr
+			}
+			return &getResp.JSON200.Metadata, nil
 		})
 	}
 

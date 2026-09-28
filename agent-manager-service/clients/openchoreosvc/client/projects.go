@@ -66,12 +66,18 @@ func (c *openChoreoClient) CreateProject(ctx context.Context, ouID string, req C
 	}
 
 	if resp.StatusCode() != http.StatusCreated && resp.StatusCode() != http.StatusOK {
-		return handleErrorResponse(resp.StatusCode(), ErrorResponses{
+		return terminatingConflict(handleErrorResponse(resp.StatusCode(), ErrorResponses{
 			JSON400: resp.JSON400,
 			JSON401: resp.JSON401,
 			JSON403: resp.JSON403,
 			JSON409: resp.JSON409,
 			JSON500: resp.JSON500,
+		}), "project", req.Name, func() (*ocapi.ObjectMeta, error) {
+			getResp, getErr := c.ocClient.GetProjectWithResponse(ctx, namespaceName, req.Name)
+			if getErr != nil || getResp.JSON200 == nil {
+				return nil, getErr
+			}
+			return &getResp.JSON200.Metadata, nil
 		})
 	}
 

@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/gen"
+	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
 
 // deletionTime is the deletionTimestamp stamped on the "already deleted" fixtures below.
@@ -172,4 +173,61 @@ func TestListSecretReferences_SkipsTerminating(t *testing.T) {
 func TestIsTerminating(t *testing.T) {
 	assert.False(t, isTerminating(liveMeta("live")))
 	assert.True(t, isTerminating(terminatingMeta("gone")))
+}
+
+// conflictServer answers every create (POST) with 409 and every read (GET) with a
+// resource carrying meta — the state OpenChoreo is in while a deleted resource of the
+// same name is still finalizing (meta terminating) or genuinely exists (meta live).
+func conflictServer(t *testing.T, meta gen.ObjectMeta) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":"already exists","code":"CONFLICT"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"metadata": meta}))
+	})
+}
+
+// A create that collides with a same-named resource still held by its cleanup finalizer
+// must say so, not "already exists": the user just deleted that resource and the console
+// no longer lists it, so a bare conflict reads as a bug.
+func TestCreate_ConflictWithTerminatingResource(t *testing.T) {
+	ctx := context.Background()
+	creates := map[string]func(c *openChoreoClient) error{
+		"component": func(c *openChoreoClient) error {
+			return c.CreateComponent(ctx, "acme", "proj", CreateComponentRequest{Name: "stage", ProvisioningType: ProvisioningExternal})
+		},
+		"project": func(c *openChoreoClient) error {
+			return c.CreateProject(ctx, "acme", CreateProjectRequest{Name: "stage", DeploymentPipeline: "default"})
+		},
+		"environment": func(c *openChoreoClient) error {
+			_, err := c.CreateEnvironment(ctx, "acme", CreateEnvironmentRequest{Name: "stage"})
+			return err
+		},
+		"deployment pipeline": func(c *openChoreoClient) error {
+			_, err := c.CreateDeploymentPipeline(ctx, "acme", "stage", nil, nil, nil)
+			return err
+		},
+		"secret reference": func(c *openChoreoClient) error {
+			_, err := c.CreateSecretReference(ctx, "acme", CreateSecretReferenceRequest{Name: "stage"})
+			return err
+		},
+	}
+
+	for kind, create := range creates {
+		t.Run(kind+"/terminating", func(t *testing.T) {
+			err := create(newTestClient(t, conflictServer(t, terminatingMeta("stage"))))
+			require.ErrorIs(t, err, utils.ErrResourceBeingDeleted)
+			assert.NotErrorIs(t, err, utils.ErrConflict,
+				"must not read as a plain conflict, or conflict-recovery paths would update an object that is going away")
+		})
+		t.Run(kind+"/live", func(t *testing.T) {
+			err := create(newTestClient(t, conflictServer(t, liveMeta("stage"))))
+			require.ErrorIs(t, err, utils.ErrConflict)
+			assert.NotErrorIs(t, err, utils.ErrResourceBeingDeleted)
+		})
+	}
 }

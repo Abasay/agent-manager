@@ -64,6 +64,8 @@ func handleEnvironmentErrors(w http.ResponseWriter, err error, fallbackMsg strin
 	switch {
 	case errors.Is(err, utils.ErrEnvironmentNotFound):
 		utils.WriteErrorResponse(w, http.StatusNotFound, "Environment not found")
+	case errors.Is(err, utils.ErrResourceBeingDeleted):
+		utils.WriteErrorResponse(w, http.StatusConflict, "An environment with this name is still being deleted, try again shortly")
 	case errors.Is(err, utils.ErrEnvironmentAlreadyExists) || errors.Is(err, utils.ErrConflict):
 		utils.WriteErrorResponse(w, http.StatusConflict, "Environment already exists")
 	case errors.Is(err, utils.ErrEnvironmentHasGateways):

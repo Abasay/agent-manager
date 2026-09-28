@@ -84,12 +84,18 @@ func (c *openChoreoClient) CreateSecretReference(ctx context.Context, ouID strin
 	}
 
 	if resp.StatusCode() != http.StatusCreated {
-		return nil, handleErrorResponse(resp.StatusCode(), ErrorResponses{
+		return nil, terminatingConflict(handleErrorResponse(resp.StatusCode(), ErrorResponses{
 			JSON400: resp.JSON400,
 			JSON401: resp.JSON401,
 			JSON403: resp.JSON403,
 			JSON409: resp.JSON409,
 			JSON500: resp.JSON500,
+		}), "secret reference", req.Name, func() (*gen.ObjectMeta, error) {
+			getResp, getErr := c.ocClient.GetSecretReferenceWithResponse(ctx, namespaceName, req.Name)
+			if getErr != nil || getResp.JSON200 == nil {
+				return nil, getErr
+			}
+			return &getResp.JSON200.Metadata, nil
 		})
 	}
 

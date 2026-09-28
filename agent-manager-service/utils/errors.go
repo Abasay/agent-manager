@@ -128,6 +128,11 @@ var (
 	ErrForbidden    = errors.New("forbidden")
 	ErrNotFound     = errors.New("not found")
 	ErrConflict     = errors.New("conflict")
+	// ErrResourceBeingDeleted is returned when a create collides with a same-named
+	// resource that has been deleted but is still waiting on its cleanup finalizer.
+	// It deliberately does not wrap ErrConflict: callers that recover from a conflict
+	// by updating the existing object must not do so against one that is going away.
+	ErrResourceBeingDeleted = errors.New("a resource with this name is still being deleted")
 
 	// Server errors
 	ErrInternalServerError = errors.New("internal server error")
