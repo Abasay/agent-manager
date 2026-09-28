@@ -27,7 +27,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #   - Ubuntu 20.04+, Debian 11+, RHEL 8+, Amazon Linux 2023, or any Linux with
 #     containerd managed by systemd
 #   - x86_64 or aarch64 (arm64) architecture
-#   - Running containerd (systemctl is-active containerd)
+#   - containerd installed.
 #   - Internet access to storage.googleapis.com
 #   - zstd or bzip2 (gVisor releases ship as a compressed tarball)
 #
@@ -63,10 +63,12 @@ if ! command -v containerd &>/dev/null; then
     exit 1
 fi
 
-if ! systemctl is-active containerd &>/dev/null; then
-    echo "❌ containerd service is not running."
-    echo "   Start it with: systemctl start containerd"
-    exit 1
+# containerd may not have been started yet
+if systemctl is-active containerd &>/dev/null; then
+    CONTAINERD_RUNNING=true
+else
+    CONTAINERD_RUNNING=false
+    echo "   containerd is installed but not running yet — configuring it for its first start"
 fi
 
 CONTAINERD_VERSION="$(containerd --version | grep -oE '[0-9]+\.[0-9]+' | head -1)"
@@ -192,14 +194,20 @@ BLOCK
 fi
 
 # --- Restart containerd ---
-# Only containerd restarts — kubelet and running pods are unaffected.
-echo "🔄 Restarting containerd to load the new runtime..."
-systemctl restart containerd
-
+# Skipped when containerd has not started yet:
+if [ "$CONTAINERD_RUNNING" = "true" ]; then
+    # Only containerd restarts — kubelet and running pods are unaffected.
+    echo "🔄 Restarting containerd to load the new runtime..."
+    systemctl restart containerd
+fi
 
 # A runtime block containerd ignores still leaves the node Ready, so this is the
-# only check that catches it
-if command -v crictl &>/dev/null; then
+# only check that catches it. crictl cannot reach a containerd that has not started.
+if [ "$CONTAINERD_RUNNING" != "true" ]; then
+    echo "   ℹ️  containerd is not running yet — skipped the restart and the registration check."
+    echo "       runsc loads when containerd starts. Confirm then with:"
+    echo "       crictl --runtime-endpoint unix:///run/containerd/containerd.sock info | grep runsc"
+elif command -v crictl &>/dev/null; then
     CRICTL=(crictl --runtime-endpoint unix:///run/containerd/containerd.sock)
     REGISTERED=false
     for _ in $(seq 1 30); do
