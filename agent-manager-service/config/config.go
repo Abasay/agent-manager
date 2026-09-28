@@ -60,6 +60,11 @@ type Config struct {
 	IsOnPremDeployment       bool
 	ServerPublicURL          string
 
+	// GrowthAnalytics configures feature-usage telemetry export. A no-op
+	// unless GrowthAnalytics.Enabled is true and MoesifCollectorBaseURL is
+	// set (both off by default); IsOnPremDeployment isn't consulted.
+	GrowthAnalytics GrowthAnalyticsConfig
+
 	// ThunderHostBaseDomain is the domain suffix env-Thunder's developer-facing
 	// hostnames are built from: "<handle>.<ThunderHostBaseDomain>".
 	// Default "amp.localhost" matches local dev (k3d + the *.amp.localhost wildcard
@@ -306,6 +311,65 @@ type ObserverConfig struct {
 	// It has NO fallback to URL: empty means "observer not configured" and
 	// clients surface that loudly.
 	PublicURL string
+}
+
+// GrowthAnalyticsConfig configures feature-usage telemetry export to Moesif.
+// Two ways to authenticate:
+//   - MoesifApplicationID set: events go to MoesifCollectorBaseURL (default
+//     https://api.moesif.net) with the X-Moesif-Application-Id header. This is
+//     how a deployment reports to its own Moesif account or proxy.
+//   - MoesifApplicationID empty: events go to a collector proxy that accepts
+//     the caller's own bearer JWT (the one already on the tracked request) and
+//     injects the Application ID server-side, as WSO2 Cloud's proxy does.
+type GrowthAnalyticsConfig struct {
+	// Enabled is the operational on/off switch for telemetry export, held
+	// separately from MoesifCollectorBaseURL so reporting can be turned off
+	// in an environment without deleting the rest of the configuration. The
+	// URL always resolves once deployed, so its presence cannot signal
+	// intent — this does. Both must be set for anything to be exported.
+	// Mirrors MOESIF_ENABLED on billing-service and platform-api-service.
+	Enabled bool
+	// ConsoleEnabled is a second, narrower switch covering only the console
+	// action stream (POST /telemetry/console-actions → Moesif's Actions API),
+	// held separately from Enabled because the two streams have wildly
+	// different volumes: console actions include page views and are driven by
+	// UI interaction, so they can arrive orders of magnitude more often than
+	// the endpoint events Enabled governs. Turning the noisy stream off must
+	// not also blind the feature-usage tracking that Track produces.
+	//
+	// It is an AND, not an override: console reporting needs Enabled,
+	// ConsoleEnabled and MoesifCollectorBaseURL all set. MOESIF_ENABLED=false
+	// still means "this deployment reports nothing to Moesif".
+	ConsoleEnabled bool
+	// MoesifCollectorBaseURL is where events are POSTed: a collector proxy
+	// (e.g. "http://<collector-host>:<port>/<collector-path>", or
+	// "http://localhost:18080/moesif-collector" through a port-forward) or
+	// Moesif itself. When MoesifApplicationID is set and this is empty, the
+	// loader defaults it to https://api.moesif.net. Empty after loading
+	// disables telemetry export; middleware/growthanalytics no-ops.
+	MoesifCollectorBaseURL string
+	// MoesifCollectorHostHeader overrides the outgoing Host header sent to
+	// the proxy. Required only for local dev through a port-forward, where
+	// the gateway routes purely on Host and localhost doesn't match the
+	// real virtual-host name. Leave empty when MoesifCollectorBaseURL's own
+	// host is already the real vhost (i.e. reached directly in-cluster).
+	MoesifCollectorHostHeader string
+	// MoesifApplicationID is the Moesif Application ID (MOESIF_APPLICATION_ID).
+	// When set, it replaces the caller's JWT as the credential on every send.
+	// A secret: supply it from a secret store and never log it.
+	MoesifApplicationID string
+	// DeploymentModel is reported as every event's "deployment_model"
+	// metadata field. Defaults to "on-prem"; the cloud deployment sets
+	// AMP_DEPLOYMENT_MODEL=saas so its events are labelled accordingly.
+	DeploymentModel string
+	// Environment names the deployment environment (e.g. "development",
+	// "production") this instance runs in, reported as every event's
+	// "environment" metadata field. All environments report into one Moesif
+	// application, so without this their usage is only separable by
+	// string-parsing the host out of each event's request URI. Empty — the
+	// local-dev default — omits the field rather than reporting a blank
+	// environment, so local traffic does not create an empty bucket.
+	Environment string
 }
 
 type POSTGRESQL struct {

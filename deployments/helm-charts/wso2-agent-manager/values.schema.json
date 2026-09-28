@@ -1280,6 +1280,59 @@
               "required": [],
               "title": "thunder",
               "type": "object"
+            },
+            "growthAnalytics": {
+              "additionalProperties": false,
+              "description": "Growth analytics (Moesif) export. Off unless enabled.",
+              "properties": {
+                "enabled": {
+                  "default": false,
+                  "description": "Master switch (MOESIF_ENABLED).",
+                  "type": "boolean"
+                },
+                "consoleEnabled": {
+                  "default": false,
+                  "description": "Console UI action stream (CONSOLE_ANALYTICS_ENABLED); also needs enabled.",
+                  "type": "boolean"
+                },
+                "collectorBaseURL": {
+                  "default": "",
+                  "description": "Collector or Moesif API base URL. Empty with an application ID means https://api.moesif.net.",
+                  "type": "string"
+                },
+                "collectorHostHeader": {
+                  "default": "",
+                  "description": "Host header override for port-forwarded proxies.",
+                  "type": "string"
+                },
+                "applicationId": {
+                  "default": "",
+                  "description": "Moesif Application ID set inline. Prefer existingSecret.",
+                  "type": "string"
+                },
+                "existingSecret": {
+                  "default": "",
+                  "description": "Secret holding the Moesif Application ID.",
+                  "type": "string"
+                },
+                "existingSecretKey": {
+                  "default": "moesif-application-id",
+                  "description": "Key within that Secret.",
+                  "type": "string"
+                },
+                "deploymentModel": {
+                  "default": "on-prem",
+                  "description": "Reported as each event's deployment_model.",
+                  "type": "string"
+                },
+                "environment": {
+                  "default": "",
+                  "description": "Reported as each event's environment.",
+                  "type": "string"
+                }
+              },
+              "title": "growthAnalytics",
+              "type": "object"
             }
           },
           "required": [],
