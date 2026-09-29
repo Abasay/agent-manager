@@ -549,6 +549,9 @@ console:
     # -- Base URL for the console's generated deployment-script commands.
     # Empty derives the public raw.githubusercontent.com URL from ampVersion.
     scriptBaseUrl: ""
+    # -- Base URL the evaluator AI Copilot prompt links the writing guide from.
+    # Empty derives the public raw.githubusercontent.com URL from ampVersion.
+    promptsBaseUrl: ""
     # Documentation version the console's in-product doc links point at, used as
     # the path segment after /docs/. "latest" tracks the newest released docs.
     # The release pipeline (.github/scripts/update-helm-charts.sh) pins this to
