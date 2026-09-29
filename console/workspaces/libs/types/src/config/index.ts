@@ -90,10 +90,11 @@ export interface AppConfig {
    */
   guardrailCapabilities?: GuardrailCapabilities;
   /**
-   * Largest request body, in bytes, the console will send on a write. Sized for
-   * a WAF that rejects bigger bodies with an opaque 403, so the console can
-   * refuse first with a readable error. "0" disables the check. Arrives as a
-   * string from the runtime config template; read it via getMaxRequestBodyBytes().
+   * Largest request body, in bytes, the console will send on a write. Unset or
+   * "0" means no limit (the default). Set it on deployments behind a WAF that
+   * rejects bigger bodies with an opaque 403, so the console refuses first with
+   * a readable error. Arrives as a string from the runtime config template;
+   * read it via getMaxRequestBodyBytes().
    */
   maxRequestBodyBytes?: string | number;
   /**
