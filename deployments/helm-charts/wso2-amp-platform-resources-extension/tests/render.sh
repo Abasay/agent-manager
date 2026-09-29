@@ -177,6 +177,36 @@ else
   FAILURES=$((FAILURES + 1))
 fi
 
+# --- generate-workload path containment (arbitrary file read) ----------------
+# A schema file is read with jq --rawfile and its bytes land in the Workload CR,
+# which the caller can read back, so the read must be confined to the checkout.
+# The confinement has to be anchored to the fixed checkout directory: anchoring it
+# to a realpath of the caller-supplied appPath let a symlink committed in the
+# repository move the trusted root (e.g. to /proc) so a schema path under that
+# target passed the "inside the checkout" check and read a file outside it. These
+# guard that the root stays fixed and both appPath and the schema file are
+# confined to it.
+if grep -qE 'CHECKOUT_ROOT=\$\(realpath /mnt/vol/source' <<<"$SCRIPT"; then
+  printf 'ok   - the checkout root is anchored to the fixed source directory\n'
+else
+  printf 'FAIL - the checkout root is not anchored to /mnt/vol/source\n'
+  FAILURES=$((FAILURES + 1))
+fi
+
+if grep -qF '"$SOURCE_ROOT"' <<<"$SCRIPT"; then
+  printf 'FAIL - containment still compares against a root derived from appPath\n'
+  FAILURES=$((FAILURES + 1))
+else
+  printf 'ok   - containment does not use an appPath-derived root\n'
+fi
+
+if [[ "$(grep -cF '"$CHECKOUT_ROOT"/*' <<<"$SCRIPT")" -ge 2 ]]; then
+  printf 'ok   - appPath and the schema file are confined to the fixed checkout root\n'
+else
+  printf 'FAIL - appPath and the schema file are not both confined to the fixed checkout root\n'
+  FAILURES=$((FAILURES + 1))
+fi
+
 # --- checkout-source ---------------------------------------------------------
 # The repository URL, branch and commit are user input on the same path, and this
 # step holds the git credential secret, so a spliced value runs next to it.
