@@ -48,7 +48,7 @@ data:
   # body limit: 0 is a real setting (no limit) and `default` would replace it.
   # `int` because Helm reads YAML numbers as floats and `quote` would render
   # 1000000 as "1e+06".
-  MAX_REQUEST_BODY_BYTES: {{ dig "maxRequestBodyBytes" 57344 .Values.console.config | int | quote }}
+  MAX_REQUEST_BODY_BYTES: {{ dig "maxRequestBodyBytes" 0 .Values.console.config | int | quote }}
   FILE_MOUNT_MAX_FILE_BYTES: {{ .Values.console.config.fileMountMaxFileBytes | default (dig "fileMountLimits" "maxFileBytes" 1000000 .Values.agentManagerService.config) | int | quote }}
   # Guardrails configuration
   GUARDRAILS_CATALOG_URL: {{ .Values.console.config.guardrailsCatalogUrl | default "" | quote }}
