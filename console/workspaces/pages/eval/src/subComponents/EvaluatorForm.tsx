@@ -17,7 +17,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useUnsavedChangesGuard } from "@agent-management-platform/shared-component";
+import {
+  getPromptGuideUrl,
+  useUnsavedChangesGuard,
+} from "@agent-management-platform/shared-component";
 import {
   Alert,
   Autocomplete,
@@ -91,7 +94,7 @@ function resolveAiPrompt(
   displayName: string,
   description: string,
 ): string {
-  const guideUrl = `${window.location.origin}/prompts/writing-evaluators.md`;
+  const guideUrl = getPromptGuideUrl("writing-evaluators.md");
   return AI_COPILOT_PROMPT_TEMPLATE.replace(
     "{{TYPE}}",
     _TYPE_LABELS[type] ?? type,

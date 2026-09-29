@@ -44,6 +44,13 @@ export interface AppConfig {
    * fail — to any host serving deployments/scripts, without a trailing slash.
    */
   scriptBaseUrl?: string;
+  /**
+   * Base URL the evaluator AI Copilot prompt links the writing guide from.
+   * Empty (the default) derives the public raw.githubusercontent.com URL for the
+   * release ref. Set it where external AI assistants cannot reach GitHub, to any
+   * public host serving the console's prompts/ directory.
+   */
+  promptsBaseUrl?: string;
   disableAuth: boolean;
   instrumentationUrl: string;
   /**

@@ -1848,6 +1848,12 @@
               "title": "instrumentationUrl",
               "type": "string"
             },
+            "promptsBaseUrl": {
+              "default": "",
+              "description": "Base URL the evaluator AI Copilot prompt links the writing guide from. Empty derives the public raw.githubusercontent.com URL from ampVersion. Set it where external AI assistants cannot reach GitHub, to any public host serving the console's prompts/ directory.",
+              "title": "promptsBaseUrl",
+              "type": "string"
+            },
             "scriptBaseUrl": {
               "default": "",
               "description": "Base URL the console's generated commands fetch deployment scripts from, without a trailing slash. Empty derives the public raw.githubusercontent.com URL from ampVersion. Set it where that host is unreachable from the operator's machine, or where this build's scripts are served from somewhere else.",
