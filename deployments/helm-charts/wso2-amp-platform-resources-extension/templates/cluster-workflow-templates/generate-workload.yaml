@@ -103,12 +103,32 @@ spec:
             # The file is read with jq --rawfile so its contents are JSON-encoded by
             # jq and never pass through the shell or through YAML text assembly.
             #
-            # The path is validated by the API before it gets here, which stops "..",
-            # but not a symlink committed in the repository: this container mounts its
-            # service account token, and whatever is read lands in the Workload CR the
-            # caller can read back. So the target is canonicalised and required to stay
-            # inside the checkout.
-            SOURCE_ROOT=$(realpath "$SOURCE_PATH" 2>/dev/null || true)
+            # This container mounts its service account token and OAuth client
+            # secret, and whatever is read here lands in the Workload CR the caller
+            # can read back, so a schema file must be confined to the checkout.
+            #
+            # Confinement is anchored to the fixed checkout directory, never to a
+            # path derived from the caller-supplied appPath. Canonicalising appPath
+            # first (the previous behaviour) let a symlink committed in the
+            # repository relocate the trusted root: an appPath pointing at such a
+            # link resolved the root to the link's target (e.g. /proc), after which
+            # a schema path under that target passed the "inside the checkout"
+            # check and read a file outside the checkout. appPath is now resolved
+            # and required to stay inside the fixed root for the same reason.
+            CHECKOUT_ROOT=$(realpath /mnt/vol/source 2>/dev/null || true)
+            if [ -z "$CHECKOUT_ROOT" ]; then
+              echo "Error: source checkout not found at /mnt/vol/source"
+              exit 1
+            fi
+
+            APP_ROOT=$(realpath "$SOURCE_PATH" 2>/dev/null || true)
+            case "${APP_ROOT}/" in
+              "$CHECKOUT_ROOT"/*) ;;
+              *)
+                echo "Error: appPath '${APP_PATH}' resolves outside the repository checkout"
+                exit 1
+                ;;
+            esac
             ENDPOINT_COUNT=$(printf '%s' "$ENDPOINTS" | jq 'length')
             i=0
             while [ "$i" -lt "$ENDPOINT_COUNT" ]; do
@@ -128,7 +148,7 @@ spec:
                 continue
               fi
               case "$resolved" in
-                "$SOURCE_ROOT"/*) ;;
+                "$CHECKOUT_ROOT"/*) ;;
                 *)
                   echo "Error: schema file '${schema_file}' resolves outside the repository checkout"
                   exit 1
