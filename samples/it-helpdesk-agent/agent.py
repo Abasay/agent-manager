@@ -9,6 +9,7 @@ When ``USE_MCP=true``, tools discovered from an AM MCP proxy are merged with
 the in-process tools. When it is off, the agent is exactly the v1 agent.
 """
 
+import os
 from __future__ import annotations
 
 from typing import Any
@@ -20,7 +21,7 @@ from langgraph.prebuilt import create_react_agent
 from config import Config
 from tools import build_tools
 
-MODEL = "gpt-4o-mini"
+MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
 
 SYSTEM_PROMPT_TEMPLATE = (
     "You are an IT helpdesk agent for {company_name}. "
@@ -120,7 +121,10 @@ def build_agent(cfg: Config, mcp_tools: list[Any] | None = None) -> Any:
             },
         )
     else:
-        llm = ChatOpenAI(model=MODEL, temperature=0)
+        llm = ChatOpenAI( model=MODEL,
+            temperature=0,
+            base_url=os.getenv("OPENAI_BASE_URL"),
+            )
 
     tools = build_tools(cfg) + list(mcp_tools or [])
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
