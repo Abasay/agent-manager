@@ -108,7 +108,19 @@ async def load_mcp_tools(cfg: Config) -> list[Any]:
 
 def build_agent(cfg: Config, mcp_tools: list[Any] | None = None) -> Any:
     if cfg.use_llm_provider:
-        llm = ChatOpenAI(
+        if cfg.is_deepseek:
+            llm = ChatOpenAI(
+                model="deepseek-chat",
+                temperature=0,
+                base_url="https://api.deepseek.com",
+                api_key="not-used",
+                default_headers={
+                # "API-Key": cfg.llm_provider_key,
+                "Authorization": "Bearer " + cfg.llm_provider_key,
+            },
+            )
+        else:
+            llm = ChatOpenAI(
             model=MODEL,
             temperature=0,
             base_url=cfg.llm_provider_url,
