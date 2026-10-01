@@ -40,7 +40,7 @@ class Config:
         use_llm_provider = _env("USE_LLM_PROVIDER", "false").lower() == "true"
         llm_provider_url = _env("LLM_PROVIDER_URL", "")
         llm_provider_key = _env("LLM_PROVIDER_KEY", "")
-        is_deepseek = _env("IS_DEEPSEEK", "false").lower() == "true"
+        is_deepseek = True if llm_provider_url == "https://api.deepseek.com" else False
 
         if use_llm_provider:
             if not llm_provider_url:
