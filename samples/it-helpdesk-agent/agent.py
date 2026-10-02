@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from langchain_openai import ChatOpenAIv
+from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.prebuilt import create_react_agent
 
