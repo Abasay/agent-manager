@@ -3,23 +3,28 @@
 Builds a ReAct-style agent bound to the instance config.
 
 When ``USE_LLM_PROVIDER=true``, requests are routed through the AM LLM
-provider (which applies guardrails). Otherwise calls OpenAI directly.
+provider (which applies guardrails). Otherwise calls the model API directly
+using OPENAI_API_KEY (and OPENAI_BASE_URL, if set).
+
+The model name comes from LLM_MODEL (default gpt-4o-mini), so DeepSeek is just
+LLM_MODEL=deepseek-chat plus the right key/base URL, with no code edits.
 
 When ``USE_MCP=true``, tools discovered from an AM MCP proxy are merged with
 the in-process tools. When it is off, the agent is exactly the v1 agent.
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAIv
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.prebuilt import create_react_agent
 
 from config import Config
 from tools import build_tools
 
-MODEL = "gpt-4o-mini"
+MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
 
 SYSTEM_PROMPT_TEMPLATE = (
     "You are an IT helpdesk agent for {company_name}. "
@@ -106,38 +111,32 @@ async def load_mcp_tools(cfg: Config) -> list[Any]:
     return list(await client.get_tools())
 
 
-def build_agent(cfg: Config, mcp_tools: list[Any] | None = None) -> Any:
+def build_llm(cfg: Config) -> ChatOpenAI:
     if cfg.use_llm_provider:
-        if cfg.is_deepseek:
-            llm = ChatOpenAI(
-                model="deepseek-chat",
-                temperature=0,
-                base_url="https://api.deepseek.com",
-                api_key=cfg.llm_provider_key,
-            )
-        else:
-            # llm = ChatOpenAI(
-            #     model=MODEL,
-            #     temperature=0,
-            #     base_url=cfg.llm_provider_url,
-            #     api_key="not-used",
-            #     default_headers={
-            #         "API-Key": cfg.llm_provider_key,
-            #         "Authorization": "",
-            #     },
-            # )
-            llm = ChatOpenAI(
-                # model="deepseek-chat",
-                temperature=0,
-                base_url="https://api.deepseek.com",
-                api_key=cfg.llm_provider_key,
-            )
-    else:
-        llm = ChatOpenAI(
-            model="deepseek-chat",
+        # Via the AM gateway: the agent holds only the gateway key. The gateway
+        # swaps in the real upstream key (e.g. DeepSeek) and applies guardrails.
+        return ChatOpenAI(
+            model=MODEL,
             temperature=0,
-            base_url="https://api.deepseek.com",
+            base_url=cfg.llm_provider_url,
+            api_key="not-used",
+            default_headers={
+                "API-Key": cfg.llm_provider_key,
+                "Authorization": "",
+            },
         )
+
+    # Direct: OPENAI_API_KEY holds the upstream key. Set OPENAI_BASE_URL to
+    # https://api.deepseek.com to talk to DeepSeek; leave it unset for OpenAI.
+    return ChatOpenAI(
+        model=MODEL,
+        temperature=0,
+        base_url=os.getenv("OPENAI_BASE_URL") or None,
+    )
+
+
+def build_agent(cfg: Config, mcp_tools: list[Any] | None = None) -> Any:
+    llm = build_llm(cfg)
 
     tools = build_tools(cfg) + list(mcp_tools or [])
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(

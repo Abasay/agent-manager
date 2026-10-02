@@ -25,7 +25,6 @@ class Config:
     mcp_url: str
     mcp_api_key: str
     issue_tracker_repo: str
-    is_deepseek: bool = False  # True if the agent is running on DeepSeek's platform
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -40,7 +39,6 @@ class Config:
         use_llm_provider = _env("USE_LLM_PROVIDER", "false").lower() == "true"
         llm_provider_url = _env("LLM_PROVIDER_URL", "")
         llm_provider_key = _env("LLM_PROVIDER_KEY", "")
-        is_deepseek = True
 
         if use_llm_provider:
             if not llm_provider_url:
@@ -51,7 +49,6 @@ class Config:
                 raise RuntimeError(
                     "USE_LLM_PROVIDER is true but LLM_PROVIDER_KEY is not set"
                 )
-
 
         use_mcp = _env("USE_MCP", "false").lower() == "true"
         mcp_url = _env("GITHUB_MCP_URL", "")
