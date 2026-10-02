@@ -114,37 +114,30 @@ def build_agent(cfg: Config, mcp_tools: list[Any] | None = None) -> Any:
                 temperature=0,
                 base_url="https://api.deepseek.com",
                 api_key=cfg.llm_provider_key,
-            #     default_headers={
-            #     # "API-Key": cfg.llm_provider_key,
-            #     "Authorization": "Bearer " + cfg.llm_provider_key,
-            # },
             )
         else:
-        #     llm = ChatOpenAI(
-        #     model=MODEL,
-        #     temperature=0,
-        #     base_url=cfg.llm_provider_url,
-        #     api_key="not-used",
-        #     default_headers={
-        #         "API-Key": cfg.llm_provider_key,
-        #         "Authorization": "",
-        #     },
-        # )
-        llm = ChatOpenAI(
+            # llm = ChatOpenAI(
+            #     model=MODEL,
+            #     temperature=0,
+            #     base_url=cfg.llm_provider_url,
+            #     api_key="not-used",
+            #     default_headers={
+            #         "API-Key": cfg.llm_provider_key,
+            #         "Authorization": "",
+            #     },
+            # )
+            llm = ChatOpenAI(
                 # model="deepseek-chat",
                 temperature=0,
                 base_url="https://api.deepseek.com",
                 api_key=cfg.llm_provider_key,
-            #     default_headers={
-            #     # "API-Key": cfg.llm_provider_key,
-            #     "Authorization": "Bearer " + cfg.llm_provider_key,
-            # },
-        )
+            )
     else:
-        llm = ChatOpenAI( model="deepseek-chat",
+        llm = ChatOpenAI(
+            model="deepseek-chat",
             temperature=0,
             base_url="https://api.deepseek.com",
-            )
+        )
 
     tools = build_tools(cfg) + list(mcp_tools or [])
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
