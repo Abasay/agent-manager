@@ -115,15 +115,22 @@ def build_llm(cfg: Config) -> ChatOpenAI:
     if cfg.use_llm_provider:
         # Via the AM gateway: the agent holds only the gateway key. The gateway
         # swaps in the real upstream key (e.g. DeepSeek) and applies guardrails.
+        # The gateway accepts the key in "API-Key" (verified with curl). Override
+        # with LLM_PROVIDER_AUTH_HEADER if your provider uses another header.
+        header = os.getenv("LLM_PROVIDER_AUTH_HEADER", "API-Key")
+
+        # This provider's context path is /chat/completions and the OpenAI client
+        # appends /chat/completions itself, so the base URL must already end in it.
+        base_url = cfg.llm_provider_url.rstrip("/")
+        if not base_url.endswith("/chat/completions"):
+            base_url += "/chat/completions"
+
         return ChatOpenAI(
             model=MODEL,
             temperature=0,
-            base_url=cfg.llm_provider_url,
+            base_url=base_url,
             api_key="not-used",
-            default_headers={
-                "API-Key": cfg.llm_provider_key,
-                "Authorization": "",
-            },
+            default_headers={header: cfg.llm_provider_key, "Authorization": ""},
         )
 
     # Direct: OPENAI_API_KEY holds the upstream key. Set OPENAI_BASE_URL to
