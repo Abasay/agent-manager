@@ -121,7 +121,8 @@ def build_llm(cfg: Config) -> ChatOpenAI:
 
         # This provider's context path is /chat/completions and the OpenAI client
         # appends /chat/completions itself, so the base URL must already end in it.
-        base_url = cfg.llm_provider_url.rstrip("/")
+        # LLM_GATEWAY_URL (optional) overrides the platform-injected URL.
+        base_url = (os.getenv("LLM_GATEWAY_URL") or cfg.llm_provider_url).rstrip("/")
         if not base_url.endswith("/chat/completions"):
             base_url += "/chat/completions"
 
@@ -130,7 +131,11 @@ def build_llm(cfg: Config) -> ChatOpenAI:
             temperature=0,
             base_url=base_url,
             api_key="not-used",
-            default_headers={header: cfg.llm_provider_key, "Authorization": ""},
+            default_headers={
+                # LLM_GATEWAY_KEY (optional) overrides the platform-injected key.
+                header: os.getenv("LLM_GATEWAY_KEY") or cfg.llm_provider_key,
+                "Authorization": "",
+            },
         )
 
     # Direct: OPENAI_API_KEY holds the upstream key. Set OPENAI_BASE_URL to
