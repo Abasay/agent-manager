@@ -113,11 +113,11 @@ def build_agent(cfg: Config, mcp_tools: list[Any] | None = None) -> Any:
                 model="deepseek-chat",
                 temperature=0,
                 base_url="https://api.deepseek.com",
-                api_key="not-used",
-                default_headers={
-                # "API-Key": cfg.llm_provider_key,
-                "Authorization": "Bearer " + cfg.llm_provider_key,
-            },
+                api_key=cfg.llm_provider_key,
+            #     default_headers={
+            #     # "API-Key": cfg.llm_provider_key,
+            #     "Authorization": "Bearer " + cfg.llm_provider_key,
+            # },
             )
         else:
             llm = ChatOpenAI(
