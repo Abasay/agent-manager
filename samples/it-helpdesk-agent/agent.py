@@ -125,7 +125,12 @@ async def load_mcp_tools(cfg: Config) -> list[Any]:
         except Exception:
             log.exception("MCP server %s unreachable; continuing without it", name)
             continue
-        log.info("MCP server %s: %d tools", name, len(server_tools))
+        log.info(
+            "MCP server %s: %d tools: %s",
+            name,
+            len(server_tools),
+            ", ".join(sorted(t.name for t in server_tools)),
+        )
         for tool in server_tools:
             if tool.name in seen:
                 new_name = f"{name}_{tool.name}"
@@ -165,15 +170,26 @@ def _mcp_prompt(cfg: Config, servers: list[str]) -> tuple[str, str]:
 
     for name in servers:
         if name == "github":
-            repo = cfg.issue_tracker_repo
+            repos = cfg.issue_tracker_repos
             capabilities.append(
-                "- Search the IT team's GitHub issue tracker for known problems "
+                "- Search the IT team's GitHub issue trackers for known problems "
                 "that match what an employee is reporting\n"
             )
-            tracker_scopes.append(
-                f"GitHub issues live in the repository {repo}; always include "
-                f"'repo:{repo}' in the search query."
-            )
+            if len(repos) == 1:
+                tracker_scopes.append(
+                    f"GitHub issues live in the repository {repos[0]}; always "
+                    f"include 'repo:{repos[0]}' in the search query."
+                )
+            else:
+                listed = ", ".join(repos)
+                qualifiers = " ".join(f"repo:{r}" for r in repos)
+                tracker_scopes.append(
+                    f"GitHub issues live in these repositories: {listed}. Search "
+                    "only them: include one repo: qualifier for each in the query "
+                    f"(for example '{qualifiers}'), or search one repository at a "
+                    "time if the results look incomplete, and tell the employee "
+                    "which repository a known issue is in."
+                )
         elif name == "jira":
             key = cfg.jira_project_key
             capabilities.append(
@@ -212,6 +228,9 @@ def _mcp_prompt(cfg: Config, servers: list[str]) -> tuple[str, str]:
             "workaround it documents instead of opening a duplicate ticket."
         )
     rules.extend(other_rules)
+    rules.append(
+        "INTERNAL TICKETS ARE NOT JIRA OR GITHUB: Tickets returned by get_open_tickets belong to the internal helpdesk system. Never describe them as Jira or GitHub items, and only say you searched Jira or GitHub if you actually called one of their tools."
+    )
     rules.append(
         "EXTERNAL SYSTEMS ARE READ-ONLY: You may search and read records in "
         "external systems. Never create, comment on, edit, close, or reopen one; "
