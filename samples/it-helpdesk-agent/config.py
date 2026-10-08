@@ -87,6 +87,23 @@ def _load_mcp_servers(use_mcp: bool, global_oauth: bool) -> tuple[McpServer, ...
     return tuple(servers)
 
 
+def _parse_repos(raw: str) -> tuple[str, ...]:
+    """Parse 'owner/repo,owner/other' into a de-duplicated tuple."""
+    repos: list[str] = []
+    for item in raw.split(","):
+        repo = item.strip()
+        if not repo:
+            continue
+        owner, _, name = repo.partition("/")
+        if not owner or not name or "/" in name:
+            raise RuntimeError(
+                f"Each tracker repository must be owner/repo, got: {repo!r}"
+            )
+        if repo.lower() not in {r.lower() for r in repos}:
+            repos.append(repo)
+    return tuple(repos)
+
+
 @dataclass(frozen=True)
 class Config:
     company_name: str
@@ -104,7 +121,7 @@ class Config:
     agentid_client_secret: str
     agentid_token_endpoint: str
     agentid_scopes: str
-    issue_tracker_repo: str
+    issue_tracker_repos: tuple[str, ...]
     jira_project_key: str
 
     @property
@@ -120,6 +137,11 @@ class Config:
             if server.name == name:
                 return server
         return None
+
+    # Kept so any code written against the single-repo config still works.
+    @property
+    def issue_tracker_repo(self) -> str:
+        return self.issue_tracker_repos[0] if self.issue_tracker_repos else ""
 
     # Kept so any code written against the single-server config still works.
     @property
@@ -172,19 +194,21 @@ class Config:
         mcp_servers = _load_mcp_servers(use_mcp, mcp_oauth)
         enabled = {s.name for s in mcp_servers}
 
-        # Which repository holds the IT team's known-issue tracker. Only required
-        # when the github server is enabled. Without it the agent would search
+        # Which repositories hold the IT team's known-issue trackers, as a
+        # comma-separated list of owner/repo. Only required when the github server
+        # is enabled. ISSUE_TRACKER_REPOS is preferred; the older single-repo
+        # ISSUE_TRACKER_REPO is still read. Without a list the agent would search
         # issues across the whole of GitHub, which is both slow and wrong.
-        issue_tracker_repo = _env("ISSUE_TRACKER_REPO", "")
+        issue_tracker_repos: tuple[str, ...] = ()
         if "github" in enabled:
-            if not issue_tracker_repo:
+            issue_tracker_repos = _parse_repos(
+                _env("ISSUE_TRACKER_REPOS", "") or _env("ISSUE_TRACKER_REPO", "")
+            )
+            if not issue_tracker_repos:
                 raise RuntimeError(
-                    "The github MCP server is enabled but ISSUE_TRACKER_REPO is not "
-                    "set (expected owner/repo, e.g. acme/it-tooling)"
-                )
-            if "/" not in issue_tracker_repo:
-                raise RuntimeError(
-                    f"ISSUE_TRACKER_REPO must be owner/repo, got: {issue_tracker_repo!r}"
+                    "The github MCP server is enabled but ISSUE_TRACKER_REPOS is not "
+                    "set (expected owner/repo, comma-separated, e.g. "
+                    "acme/it-tooling,acme/infra-issues)"
                 )
 
         # Optional: restrict Jira searches to one project (for example "IT").
@@ -208,6 +232,6 @@ class Config:
             agentid_client_secret=_env("AMP_AGENTID_CLIENT_SECRET", ""),
             agentid_token_endpoint=_env("AMP_AGENTID_TOKEN_ENDPOINT", ""),
             agentid_scopes=_env("AMP_AGENTID_SCOPES", ""),
-            issue_tracker_repo=issue_tracker_repo,
+            issue_tracker_repos=issue_tracker_repos,
             jira_project_key=jira_project_key,
         )
