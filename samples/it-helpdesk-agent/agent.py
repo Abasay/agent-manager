@@ -206,6 +206,16 @@ def _mcp_prompt(cfg: Config, servers: list[str]) -> tuple[str, str]:
                     "Jira: search only the IT team's Jira project, not other "
                     "teams' projects."
                 )
+            if cfg.jira_cloud_id:
+                tracker_scopes.append(
+                    "For every Jira tool call, pass cloudId exactly "
+                    f"'{cfg.jira_cloud_id}'; never invent or change it."
+                )
+            else:
+                tracker_scopes.append(
+                    "Jira tools need a cloudId: call the discover tool first to "
+                    "get the site's value and use that; never guess one."
+                )
         else:
             text = descriptions.get(name) or (
                 f"Use the {name} tools for read-only lookups"
@@ -228,6 +238,9 @@ def _mcp_prompt(cfg: Config, servers: list[str]) -> tuple[str, str]:
             "workaround it documents instead of opening a duplicate ticket."
         )
     rules.extend(other_rules)
+    rules.append(
+        "TOOL ERRORS: Never invent values for tool parameters such as IDs, site names or keys; use only values the employee, the configuration, or an earlier tool result gave you. If a tool call returns an error, tell the employee what failed using the error text, and do not claim you cannot access a system unless a tool error says so."
+    )
     rules.append(
         "INTERNAL TICKETS ARE NOT JIRA OR GITHUB: Tickets returned by get_open_tickets belong to the internal helpdesk system. Never describe them as Jira or GitHub items, and only say you searched Jira or GitHub if you actually called one of their tools."
     )

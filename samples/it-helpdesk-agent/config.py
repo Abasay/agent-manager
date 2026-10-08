@@ -123,6 +123,7 @@ class Config:
     agentid_scopes: str
     issue_tracker_repos: tuple[str, ...]
     jira_project_key: str
+    jira_cloud_id: str
 
     @property
     def agentid_ready(self) -> bool:
@@ -214,6 +215,11 @@ class Config:
         # Optional: restrict Jira searches to one project (for example "IT").
         jira_project_key = _env("JIRA_PROJECT_KEY", "").strip()
 
+        # Optional but recommended: the Atlassian site the Jira tools should use,
+        # as the site hostname (for example yourcompany.atlassian.net) or its
+        # cloud ID. Without it the model has to discover or guess the value.
+        jira_cloud_id = _env("JIRA_CLOUD_ID", "").strip()
+
         return cls(
             company_name=_env("COMPANY_NAME", "AcmeCorp"),
             tone=_env("TONE", "professional and helpful"),
@@ -234,4 +240,5 @@ class Config:
             agentid_scopes=_env("AMP_AGENTID_SCOPES", ""),
             issue_tracker_repos=issue_tracker_repos,
             jira_project_key=jira_project_key,
+            jira_cloud_id=jira_cloud_id,
         )
