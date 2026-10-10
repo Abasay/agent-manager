@@ -52,6 +52,7 @@ def health() -> dict[str, Any]:
         "agent_version": CONFIG.agent_version,
         "mcp_enabled": CONFIG.use_mcp,
         "mcp_tool_count": len(MCP_TOOLS),
+        "data_mode": CONFIG.data_mode,
     }
 
 

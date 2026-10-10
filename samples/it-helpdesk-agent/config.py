@@ -124,6 +124,15 @@ class Config:
     issue_tracker_repos: tuple[str, ...]
     jira_project_key: str
     jira_cloud_id: str
+    data_mode: str
+    jira_issue_type: str
+    jira_outage_label: str
+    jira_l2_label: str
+    confluence_space_key: str
+
+    @property
+    def jira_mode(self) -> bool:
+        return self.data_mode == "jira"
 
     @property
     def agentid_ready(self) -> bool:
@@ -220,6 +229,26 @@ class Config:
         # cloud ID. Without it the model has to discover or guess the value.
         jira_cloud_id = _env("JIRA_CLOUD_ID", "").strip()
 
+        # DATA_MODE=mock (default) runs on the bundled AcmeCorp JSON fixtures.
+        # DATA_MODE=jira drops every fixture-backed tool: requesters are real Jira
+        # users, tickets are tasks in JIRA_PROJECT_KEY, and policies come from
+        # Confluence. Writes are limited to that project in code (see guard.py).
+        data_mode = _env("DATA_MODE", "mock").strip().lower()
+        if data_mode not in ("mock", "jira"):
+            raise RuntimeError(f"DATA_MODE must be mock or jira, got: {data_mode!r}")
+        if data_mode == "jira":
+            jira_project_key = jira_project_key.upper()
+            if "jira" not in enabled:
+                raise RuntimeError(
+                    "DATA_MODE=jira needs the jira MCP server: set USE_MCP=true and "
+                    "include jira in MCP_SERVERS"
+                )
+            if not re.fullmatch(r"[A-Z][A-Z0-9_]+", jira_project_key):
+                raise RuntimeError(
+                    "DATA_MODE=jira needs JIRA_PROJECT_KEY set to your board's "
+                    f"project key (for example IT), got: {jira_project_key!r}"
+                )
+
         return cls(
             company_name=_env("COMPANY_NAME", "AcmeCorp"),
             tone=_env("TONE", "professional and helpful"),
@@ -241,4 +270,9 @@ class Config:
             issue_tracker_repos=issue_tracker_repos,
             jira_project_key=jira_project_key,
             jira_cloud_id=jira_cloud_id,
+            data_mode=data_mode,
+            jira_issue_type=_env("JIRA_ISSUE_TYPE", "Task").strip() or "Task",
+            jira_outage_label=_env("JIRA_OUTAGE_LABEL", "outage").strip() or "outage",
+            jira_l2_label=_env("JIRA_L2_LABEL", "l2").strip() or "l2",
+            confluence_space_key=_env("CONFLUENCE_SPACE_KEY", "").strip(),
         )
