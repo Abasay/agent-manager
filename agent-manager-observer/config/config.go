@@ -121,14 +121,19 @@ func (o *ObserverConfig) validate() error {
 	if strings.TrimSpace(o.BaseURL) == "" {
 		return fmt.Errorf("OPENCHOREO_OBSERVER_URL is required")
 	}
+	return nil
+}
+
+// ValidateClientCredentials checks the IDP settings needed by observer.NewAuthProvider.
+func (o ObserverConfig) ValidateClientCredentials() error {
 	if strings.TrimSpace(o.TokenURL) == "" {
-		return fmt.Errorf("IDP_TOKEN_URL is required when OPENCHOREO_OBSERVER_URL is set")
+		return fmt.Errorf("IDP_TOKEN_URL is required")
 	}
 	if strings.TrimSpace(o.ClientID) == "" {
-		return fmt.Errorf("IDP_CLIENT_ID is required when OPENCHOREO_OBSERVER_URL is set")
+		return fmt.Errorf("IDP_CLIENT_ID is required")
 	}
 	if strings.TrimSpace(o.ClientSecret) == "" {
-		return fmt.Errorf("IDP_CLIENT_SECRET is required when OPENCHOREO_OBSERVER_URL is set")
+		return fmt.Errorf("IDP_CLIENT_SECRET is required")
 	}
 	return nil
 }

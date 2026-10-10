@@ -21,10 +21,11 @@ MCP_TOOLS = asyncio.run(load_mcp_tools(CONFIG))
 
 AGENT = build_agent(CONFIG, MCP_TOOLS)
 log.info(
-    "IT helpdesk agent ready (company=%s, version=%s, llm_provider=%s, mcp_tools=%d)",
+    "IT helpdesk agent ready (company=%s, version=%s, llm_provider=%s, mcp_auth=%s, mcp_tools=%d)",
     CONFIG.company_name,
     CONFIG.agent_version,
     "agent-manager" if CONFIG.use_llm_provider else "openai-direct",
+    "oauth" if CONFIG.mcp_oauth else "api-key",
     len(MCP_TOOLS),
 )
 
@@ -51,6 +52,7 @@ def health() -> dict[str, Any]:
         "company": CONFIG.company_name,
         "agent_version": CONFIG.agent_version,
         "mcp_enabled": CONFIG.use_mcp,
+        "mcp_auth": "oauth" if CONFIG.mcp_oauth else "api-key",
         "mcp_tool_count": len(MCP_TOOLS),
     }
 

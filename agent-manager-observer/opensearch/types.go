@@ -178,10 +178,12 @@ type TraceOverview struct {
 	EndTime         string       `json:"endTime"`
 	DurationInNanos int64        `json:"durationInNanos"` // Total trace duration in nanoseconds
 	SpanCount       int          `json:"spanCount"`
-	TokenUsage      *TokenUsage  `json:"tokenUsage,omitempty"` // Aggregated token usage from GenAI spans
-	Status          *TraceStatus `json:"status,omitempty"`     // Trace status including error information
-	Input           interface{}  `json:"input,omitempty"`      // Input from root span (nil if not found)
-	Output          interface{}  `json:"output,omitempty"`     // Output from root span (nil if not found)
+	TokenUsage      *TokenUsage  `json:"tokenUsage,omitempty"`     // Aggregated token usage from GenAI spans
+	Status          *TraceStatus `json:"status,omitempty"`         // Trace status including error information
+	Input           interface{}  `json:"input,omitempty"`          // Input from root span (nil if not found)
+	Output          interface{}  `json:"output,omitempty"`         // Output from root span (nil if not found)
+	Models          []string     `json:"models,omitempty"`         // Distinct model names across the trace's LLM spans, first-seen order
+	ConversationID  string       `json:"conversationId,omitempty"` // First conversation ID on the root or the spans enrichment read (ExtractConversationID)
 }
 
 // TraceStatus represents the status of a trace
@@ -217,8 +219,11 @@ type TokenUsage struct {
 
 // TraceOverviewResponse represents the response for trace overview queries
 type TraceOverviewResponse struct {
-	Traces     []TraceOverview `json:"traces"`
-	TotalCount int             `json:"totalCount"`
+	Traces       []TraceOverview `json:"traces"`
+	TotalCount   int             `json:"totalCount"`
+	LookedBackTo string          `json:"lookedBackTo"`
+	Truncated    bool            `json:"truncated"`
+	NextCursor   string          `json:"nextCursor,omitempty"`
 }
 
 // FullTrace represents a complete trace with all spans and metadata
@@ -244,7 +249,14 @@ type FullTrace struct {
 type TraceExportResponse struct {
 	Traces     []FullTrace `json:"traces"`
 	TotalCount int         `json:"totalCount"`
-	Truncated  bool        `json:"truncated"`
+	// LookedBackTo is how far a filtered export looked (RFC3339Nano); empty without filters.
+	LookedBackTo string `json:"lookedBackTo,omitempty"`
+	// Truncated is true when the search stopped before the end of the window or SpansTruncated is true.
+	Truncated bool `json:"truncated"`
+	// SpansTruncated is true when an exported trace hit the span cap and its spans were cut.
+	SpansTruncated bool `json:"spansTruncated"`
+	// FailedTraceIDs lists traces left out because they couldn't be read, in selection or span fetch.
+	FailedTraceIDs []string `json:"failedTraceIds,omitempty"`
 }
 
 // SearchResponse represents OpenSearch search response

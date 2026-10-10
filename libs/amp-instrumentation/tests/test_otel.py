@@ -21,9 +21,14 @@ import os
 import pytest
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
 
 from amp_instrumentation import otel
 from amp_instrumentation._bootstrap import constants as env_vars
+from amp_instrumentation.conversation import ConversationIdSpanProcessor
 
 
 class TestTracesEndpoint:
@@ -74,3 +79,29 @@ class TestInitOtel:
         # A second call must not raise and must not change state.
         otel.init_otel()
         assert otel._initialized is True
+
+    def test_registers_conversation_processor_once_beside_the_exporter(
+        self, configure_environment, monkeypatch, record_processors
+    ):
+        created = []
+
+        def make_provider():
+            provider = TracerProvider()
+            created.append((provider, record_processors(provider)))
+            return provider
+
+        exporter_processor = SimpleSpanProcessor(InMemorySpanExporter())
+        monkeypatch.setattr(otel, "TracerProvider", make_provider)
+        monkeypatch.setattr(
+            otel, "BatchSpanProcessor", lambda exporter: exporter_processor
+        )
+        monkeypatch.setattr(trace, "set_tracer_provider", lambda provider: None)
+        monkeypatch.setattr(otel, "_initialized", False)
+
+        otel.init_otel()
+        otel.init_otel()
+
+        assert len(created) == 1
+        _, added = created[0]
+        assert added[0] is exporter_processor
+        assert [type(p) for p in added[1:]] == [ConversationIdSpanProcessor]

@@ -26,5 +26,10 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: './setupTests.tsx',
+    server: {
+      deps: {
+        inline: ['@wso2/oxygen-ui', '@wso2/oxygen-ui-icons-react', '@mui/x-data-grid'],
+      },
+    },
   },
 });

@@ -19,26 +19,28 @@ jobs:
     runs-on:
       - codebuild-wso2_agent-manager-${{ github.run_id }}-${{ github.run_attempt }}
     timeout-minutes: 60
+    # One shard per interpreter: on a single runner the full matrix outgrew the
+    # 60-minute timeout. Keep this list in sync with `python` in matrix.yaml.
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
-          python-version: |
-            3.10
-            3.11
-            3.12
-            3.13
+          python-version: ${{ matrix.python }}
       # pyyaml is required by harness/manifest.py at module import time —
       # `nox -s emission` loads it before any per-cell venv exists.
       - run: pip install nox pyyaml
-      - name: Run full emission matrix
+      - name: Run emission shard
         working-directory: test/instrumentation-matrix
-        run: nox -s emission
+        run: nox -s emission -- --python-version=${{ matrix.python }}
         continue-on-error: true   # advisory — failures surface in the report
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: nightly-emission
+          name: nightly-emission-py${{ matrix.python }}
           path: test/instrumentation-matrix/reports/cells/
 
   heavy-tier:
@@ -277,10 +279,12 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install nox pyyaml
+      # Merge the per-interpreter shards; each cell report is its own file.
       - uses: actions/download-artifact@v8
         if: always()
         with:
-          name: nightly-emission
+          pattern: nightly-emission-*
+          merge-multiple: true
           path: test/instrumentation-matrix/reports/cells/
         continue-on-error: true
       - uses: actions/download-artifact@v8

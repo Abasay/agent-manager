@@ -38,6 +38,9 @@ const (
 	conditionHighTokenUsage = "high_token_usage"
 	conditionToolCallFails  = "tool_call_fails"
 	conditionExcessiveSteps = "excessive_steps"
+
+	statusError = "error"
+	statusOK    = "ok"
 )
 
 type ListTracesOptions struct {
@@ -63,6 +66,15 @@ type ListTracesOptions struct {
 	MaxLatency int
 	MaxTokens  int
 	MaxSpans   int
+
+	// Server-side filters; nil or empty means unset.
+	Status         string
+	MinDurationMs  *int64
+	MinTokens      *int64
+	MinSpans       *int64
+	Model          string
+	ConversationID string
+	ShowModels     bool
 }
 
 func parseTimeOrZero(s string) time.Time {
@@ -73,6 +85,35 @@ func parseTimeOrZero(s string) time.Time {
 	return t
 }
 
+// listParams builds the request shared by the list and tool_call_fails paths.
+func listParams(o *ListTracesOptions) *observersvc.ListTracesParams {
+	limit := o.Limit
+	sortOrder := o.SortOrder
+	return &observersvc.ListTracesParams{
+		Organization:   o.Org,
+		Project:        o.Proj,
+		Agent:          o.AgentName,
+		Environment:    o.Env,
+		StartTime:      parseTimeOrZero(o.StartTime),
+		EndTime:        parseTimeOrZero(o.EndTime),
+		Limit:          &limit,
+		SortOrder:      &sortOrder,
+		Status:         o.Status,
+		MinDurationMs:  o.MinDurationMs,
+		MinTokens:      o.MinTokens,
+		MinSpanCount:   o.MinSpans,
+		Model:          o.Model,
+		ConversationID: o.ConversationID,
+	}
+}
+
+// hasFilters reports whether any filter flag is set.
+func hasFilters(o *ListTracesOptions) bool {
+	return o.Status != "" || o.MinDurationMs != nil || o.MinTokens != nil || o.MinSpans != nil ||
+		o.Model != "" || o.ConversationID != ""
+}
+
+// runListTraces lists trace overviews, filtered server-side.
 func runListTraces(ctx context.Context, o *ListTracesOptions) error {
 	if err := cmdutil.ValidatePathParam("agent name", o.AgentName); err != nil {
 		return render.Error(o.IO, o.Scope, err)
@@ -82,50 +123,76 @@ func runListTraces(ctx context.Context, o *ListTracesOptions) error {
 		return render.Error(o.IO, o.Scope, err)
 	}
 
-	limit := o.Limit
-	sortOrder := o.SortOrder
-	resp, err := client.ListTraces(ctx, &observersvc.ListTracesParams{
-		Organization: o.Org,
-		Project:      o.Proj,
-		Agent:        o.AgentName,
-		Environment:  o.Env,
-		StartTime:    parseTimeOrZero(o.StartTime),
-		EndTime:      parseTimeOrZero(o.EndTime),
-		Limit:        &limit,
-		SortOrder:    &sortOrder,
-	})
+	params := listParams(o)
+	params.IncludeModels = o.ShowModels
+	resp, err := client.ListTraces(ctx, params)
 	if err != nil {
 		return render.Error(o.IO, o.Scope, cmdutil.ObserverErrorFromResponse(err))
 	}
 
 	if o.IO.JSON {
+		// The CLI takes no cursor, so don't print one.
+		resp.NextCursor = ""
 		return render.JSONSuccess(o.IO, o.Scope, resp)
 	}
 
 	if len(resp.Traces) == 0 {
-		fmt.Fprintln(o.IO.Out, "No traces found.")
-		return nil
+		if hasFilters(o) {
+			fmt.Fprintln(o.IO.Out, "No traces match the filters.")
+		} else {
+			fmt.Fprintln(o.IO.Out, "No traces found.")
+		}
+	} else if err := renderOverviewTable(o, resp.Traces, true, o.ShowModels || o.Model != ""); err != nil {
+		return err
 	}
-
-	return renderOverviewTable(o, resp.Traces)
+	if resp.Truncated {
+		fmt.Fprintln(o.IO.ErrOut, truncatedNotice(resp.NextCursor != ""))
+	}
+	return nil
 }
 
-func renderOverviewTable(o *ListTracesOptions, traces []observersvc.TraceOverview) error {
-	tp := tableprinter.New(o.IO, "trace id", "status", "duration", "spans", "tokens", "root span", "started")
+// truncatedNotice explains a truncated list. With a cursor the examine cap or
+// the time budget stopped the search; without one the list hit the depth cap.
+func truncatedNotice(hasCursor bool) string {
+	if hasCursor {
+		return "Showing matches from the traces searched so far; narrow the time range to see more."
+	}
+	return "The list stops here: the remaining traces are more than 1,000 traces into this time range; narrow the time range to see more."
+}
+
+// renderOverviewTable prints traces as a table, with optional conversation and model columns.
+func renderOverviewTable(o *ListTracesOptions, traces []observersvc.TraceOverview, showConversation, showModels bool) error {
+	headers := []string{"trace id", "status", "duration", "spans", "tokens", "root span"}
+	if showConversation {
+		headers = append(headers, "conversation")
+	}
+	if showModels {
+		headers = append(headers, "model")
+	}
+	tp := tableprinter.New(o.IO, append(headers, "started")...)
 	for _, tr := range traces {
-		tp.AddField(truncate(tr.TraceID, 16))
+		tp.AddField(tr.TraceID)
 		tp.AddField(traceStatus(tr.Status))
 		tp.AddField(formatDuration(tr.DurationInNanos))
 		tp.AddField(fmt.Sprintf("%d", tr.SpanCount))
 		tp.AddField(tokenCount(tr.TokenUsage))
 		tp.AddField(truncate(tr.RootSpanName, 20))
+		if showConversation {
+			tp.AddField(orDash(truncate(tr.ConversationID, 20)))
+		}
+		if showModels {
+			tp.AddField(modelList(tr.Models))
+		}
 		tp.AddField(timeAgo(tr.StartTime))
 		tp.EndRow()
 	}
 	return tp.Render()
 }
 
-func runFilteredTraces(ctx context.Context, o *ListTracesOptions) error {
+// runToolCallFails lists traces with a failed tool span. The server has no
+// tool filter until Milestone 2, so this checks the spans of one exported
+// page client-side; the other filters still run server-side.
+func runToolCallFails(ctx context.Context, o *ListTracesOptions) error {
 	if err := cmdutil.ValidatePathParam("agent name", o.AgentName); err != nil {
 		return render.Error(o.IO, o.Scope, err)
 	}
@@ -134,47 +201,21 @@ func runFilteredTraces(ctx context.Context, o *ListTracesOptions) error {
 		return render.Error(o.IO, o.Scope, err)
 	}
 
-	limit := o.Limit
-	sortOrder := o.SortOrder
-	params := &observersvc.ListTracesParams{
-		Organization: o.Org,
-		Project:      o.Proj,
-		Agent:        o.AgentName,
-		Environment:  o.Env,
-		StartTime:    parseTimeOrZero(o.StartTime),
-		EndTime:      parseTimeOrZero(o.EndTime),
-		Limit:        &limit,
-		SortOrder:    &sortOrder,
-	}
-
-	// tool_call_fails needs span attributes; everything else can filter from overview.
-	if o.Condition == conditionToolCallFails {
-		resp, err := client.ExportTraces(ctx, params)
-		if err != nil {
-			return render.Error(o.IO, o.Scope, cmdutil.ObserverErrorFromResponse(err))
-		}
-		filtered := make([]observersvc.TraceOverview, 0, len(resp.Traces))
-		for _, tr := range resp.Traces {
-			if matchesFullCondition(tr) {
-				filtered = append(filtered, tr.TraceOverview)
-			}
-		}
-		return renderFilteredOverview(o, filtered)
-	}
-
-	resp, err := client.ListTraces(ctx, params)
+	resp, err := client.ExportTraces(ctx, listParams(o))
 	if err != nil {
 		return render.Error(o.IO, o.Scope, cmdutil.ObserverErrorFromResponse(err))
 	}
 	filtered := make([]observersvc.TraceOverview, 0, len(resp.Traces))
 	for _, tr := range resp.Traces {
-		if matchesOverviewCondition(tr, o) {
-			filtered = append(filtered, tr)
+		if matchesFullCondition(tr) {
+			filtered = append(filtered, tr.TraceOverview)
 		}
 	}
 	return renderFilteredOverview(o, filtered)
 }
 
+// renderFilteredOverview prints the tool_call_fails result. Export carries no
+// conversation ID or models, so the table leaves those columns out.
 func renderFilteredOverview(o *ListTracesOptions, traces []observersvc.TraceOverview) error {
 	if o.IO.JSON {
 		if traces == nil {
@@ -189,7 +230,7 @@ func renderFilteredOverview(o *ListTracesOptions, traces []observersvc.TraceOver
 		fmt.Fprintln(o.IO.Out, "No traces match the condition.")
 		return nil
 	}
-	return renderOverviewTable(o, traces)
+	return renderOverviewTable(o, traces, false, false)
 }
 
 var validConditions = []string{
@@ -212,20 +253,68 @@ func validateCondition(c string) error {
 	return cmdutil.FlagErrorf("--condition: %q is not valid; must be one of %s", c, strings.Join(validConditions, ", "))
 }
 
-func matchesOverviewCondition(tr observersvc.TraceOverview, o *ListTracesOptions) bool {
+// resolveFilters checks the filter flags and maps --condition onto them.
+func resolveFilters(o *ListTracesOptions) error {
+	if err := validateCondition(o.Condition); err != nil {
+		return err
+	}
+	if o.Status != "" && o.Status != statusError && o.Status != statusOK {
+		return cmdutil.FlagErrorf("--status: %q is not valid; must be error or ok", o.Status)
+	}
+	for _, m := range []struct {
+		flag     string
+		negative bool
+	}{
+		{"--min-duration", o.MinDurationMs != nil && *o.MinDurationMs < 0},
+		{"--min-tokens", o.MinTokens != nil && *o.MinTokens < 0},
+		{"--min-spans", o.MinSpans != nil && *o.MinSpans < 0},
+		{"--max-latency", o.MaxLatency < 0},
+		{"--max-tokens", o.MaxTokens < 0},
+		{"--max-spans", o.MaxSpans < 0},
+	} {
+		if m.negative {
+			return cmdutil.FlagErrorf("%s must not be negative", m.flag)
+		}
+	}
+	if o.ShowModels && o.Condition == conditionToolCallFails {
+		return cmdutil.FlagErrorf("--show-models can't be used with --condition %s", conditionToolCallFails)
+	}
+	return applyCondition(o)
+}
+
+// applyCondition turns a --condition shorthand into the filter it stands for.
+// The thresholds were checked with >, so each minimum is one above its threshold.
+func applyCondition(o *ListTracesOptions) error {
+	conflict := func(flag string) error {
+		return cmdutil.FlagErrorf("--condition %s and %s set the same filter; use one", o.Condition, flag)
+	}
 	switch o.Condition {
 	case conditionErrorStatus:
-		return tr.Status != nil && tr.Status.ErrorCount > 0
+		if o.Status != "" {
+			return conflict("--status")
+		}
+		o.Status = statusError
 	case conditionHighLatency:
-		return tr.DurationInNanos/1_000_000 > int64(o.MaxLatency)
+		if o.MinDurationMs != nil {
+			return conflict("--min-duration")
+		}
+		o.MinDurationMs = int64Ptr(int64(o.MaxLatency) + 1)
 	case conditionHighTokenUsage:
-		return tr.TokenUsage != nil && tr.TokenUsage.TotalTokens > o.MaxTokens
+		if o.MinTokens != nil {
+			return conflict("--min-tokens")
+		}
+		o.MinTokens = int64Ptr(int64(o.MaxTokens) + 1)
 	case conditionExcessiveSteps:
-		return tr.SpanCount > o.MaxSpans
-	default:
-		return false
+		if o.MinSpans != nil {
+			return conflict("--min-spans")
+		}
+		o.MinSpans = int64Ptr(int64(o.MaxSpans) + 1)
 	}
+	return nil
 }
+
+// int64Ptr returns a pointer to v.
+func int64Ptr(v int64) *int64 { return &v }
 
 func matchesFullCondition(tr observersvc.FullTrace) bool {
 	for _, span := range tr.Spans {
@@ -255,4 +344,24 @@ func tokenCount(usage *observersvc.TokenUsage) string {
 		return "0"
 	}
 	return fmt.Sprintf("%d", usage.TotalTokens)
+}
+
+// orDash returns s, or "-" when s is empty.
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+// modelList shows the first model and how many more there are.
+func modelList(models []string) string {
+	switch len(models) {
+	case 0:
+		return "-"
+	case 1:
+		return truncate(models[0], 24)
+	default:
+		return fmt.Sprintf("%s +%d", truncate(models[0], 24), len(models)-1)
+	}
 }

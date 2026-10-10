@@ -129,7 +129,7 @@ interface ErrorPageProps {
     message: string;
     title: string;
     subTitle?: string;
-    /** When provided, shows a secondary "Log Out" button next to "Try Again". */
+    /** When provided, shows a secondary "Sign Out" button next to "Try Again". */
     onLogout?: () => void;
 }
 
@@ -149,7 +149,7 @@ function ErrorPage({ message, title, subTitle, onLogout }: ErrorPageProps) {
                             startIcon={<LogOut size={18} />}
                             onClick={onLogout}
                         >
-                            Log Out
+                            Sign out
                         </Button>
                     )}
                     <Button
@@ -158,7 +158,7 @@ function ErrorPage({ message, title, subTitle, onLogout }: ErrorPageProps) {
                         startIcon={<RefreshCw size={18} />}
                         onClick={() => window.location.reload()}
                     >
-                        Try Again
+                        Try again
                     </Button>
                 </>
             }

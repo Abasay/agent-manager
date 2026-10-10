@@ -18,6 +18,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -48,18 +49,32 @@ const (
 	traceDetailsSortOrder = "asc"
 )
 
-// listTracesInput backs both list_traces (-> GetTraceOverviews) and
-// get_traces (-> ExportTraces): both REST routes accept the same scope,
-// time-window and paging inputs.
+// tracesInput backs get_traces (-> ExportTraces) and is the base of
+// listTracesInput: both REST routes accept the same scope, time-window,
+// paging and filter inputs. Set filters AND together.
+type tracesInput struct {
+	Organization   string `json:"organization" jsonschema:"required"`
+	Project        string `json:"project" jsonschema:"required"`
+	Agent          string `json:"agent" jsonschema:"required"`
+	Environment    string `json:"environment" jsonschema:"required"`
+	StartTime      string `json:"start_time,omitempty"`
+	EndTime        string `json:"end_time,omitempty"`
+	Limit          *int   `json:"limit,omitempty"`
+	SortOrder      string `json:"sort_order,omitempty"`
+	Status         string `json:"status,omitempty" jsonschema:"Only traces whose root span is 'error' or 'ok'. ANDs with the other filters."`
+	MinDurationMs  *int64 `json:"min_duration_ms,omitempty" jsonschema:"Only traces lasting at least this many milliseconds. ANDs with the other filters."`
+	MinTokens      *int64 `json:"min_tokens,omitempty" jsonschema:"Only traces using at least this many tokens in total; a trace with no token usage never matches. ANDs with the other filters."`
+	MinSpanCount   *int64 `json:"min_span_count,omitempty" jsonschema:"Only traces with at least this many spans. ANDs with the other filters."`
+	Model          string `json:"model,omitempty" jsonschema:"Only traces where a model name contains this value, ignoring case (gpt-4o also matches gpt-4o-mini). ANDs with the other filters."`
+	ConversationID string `json:"conversation_id,omitempty" jsonschema:"Only traces with exactly this conversation ID. ANDs with the other filters."`
+}
+
+// listTracesInput backs list_traces (-> GetTraceOverviews), which also takes
+// include_models and a paging cursor.
 type listTracesInput struct {
-	Organization string `json:"organization" jsonschema:"required"`
-	Project      string `json:"project" jsonschema:"required"`
-	Agent        string `json:"agent" jsonschema:"required"`
-	Environment  string `json:"environment" jsonschema:"required"`
-	StartTime    string `json:"start_time,omitempty"`
-	EndTime      string `json:"end_time,omitempty"`
-	Limit        *int   `json:"limit,omitempty"`
-	SortOrder    string `json:"sort_order,omitempty"`
+	tracesInput
+	IncludeModels bool   `json:"include_models,omitempty" jsonschema:"Fill models on every trace. Costs one extra upstream call per trace; the model filter implies it."`
+	Cursor        string `json:"cursor,omitempty" jsonschema:"nextCursor from a previous list_traces result, to get the next page. Send the same time window, sort order and filters."`
 }
 
 // traceDetailsInput mirrors REST GetTraceSpans: only organization + trace_id
@@ -89,13 +104,18 @@ func (t *Toolsets) registerTraceTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name: "list_traces",
 		Description: "Returns a summary view of recent traces for an agent within a time window. " +
-			"A trace is a single end-to-end execution record for an agent request. ",
+			"A trace is a single end-to-end execution record for an agent request. " +
+			"Filters are applied server-side across the whole window, not just one page. " +
+			"The result reports lookedBackTo (how far back the search got) and truncated (the search stopped early); " +
+			"pass nextCursor back as cursor to continue.",
 	}, withToolLogging("list_traces", listTraces(t.Tracing, authorize)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name: "get_traces",
 		Description: "Returns the traces for an agent including full span details within a time window. " +
-			"A trace is a single end-to-end execution record for an agent which contains spans that record the internal steps of an execution.",
+			"A trace is a single end-to-end execution record for an agent which contains spans that record the internal steps of an execution. " +
+			"Filters are applied server-side across the whole window. " +
+			"The result reports lookedBackTo (how far back a filtered search got) and truncated (the search stopped early or a trace's spans were cut).",
 	}, withToolLogging("get_traces", getTraces(t.Tracing, authorize)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
@@ -139,38 +159,89 @@ func requireTraceScope(organization, project, agent, environment string) (scoped
 	return scopedTraceInput{Organization: org, Project: project, Agent: agent, Environment: environment}, nil
 }
 
+// queryParams validates the inputs list_traces and get_traces share.
+func (in tracesInput) queryParams(defaultLimit, maxLimit int) (controllers.TraceQueryParams, error) {
+	scope, err := requireTraceScope(in.Organization, in.Project, in.Agent, in.Environment)
+	if err != nil {
+		return controllers.TraceQueryParams{}, err
+	}
+	startTime, endTime, err := resolveTraceTimeWindow(in.StartTime, in.EndTime)
+	if err != nil {
+		return controllers.TraceQueryParams{}, err
+	}
+	sortOrder, err := validateSortOrder(in.SortOrder, "desc")
+	if err != nil {
+		return controllers.TraceQueryParams{}, err
+	}
+	limit, err := validateLimit(in.Limit, defaultLimit, maxLimit)
+	if err != nil {
+		return controllers.TraceQueryParams{}, err
+	}
+	filters, err := in.filters()
+	if err != nil {
+		return controllers.TraceQueryParams{}, err
+	}
+	return controllers.TraceQueryParams{
+		Organization: scope.Organization,
+		Project:      &scope.Project,
+		Agent:        &scope.Agent,
+		Environment:  &scope.Environment,
+		StartTime:    startTime,
+		EndTime:      endTime,
+		Limit:        limit,
+		SortOrder:    sortOrder,
+		Filters:      filters,
+	}, nil
+}
+
+// filters validates the filter inputs with the HTTP handler's rules.
+func (in tracesInput) filters() (controllers.TraceFilters, error) {
+	status, err := controllers.ParseTraceStatus(in.Status)
+	if err != nil {
+		return controllers.TraceFilters{}, err
+	}
+	for _, m := range []struct {
+		name string
+		val  *int64
+	}{{"min_duration_ms", in.MinDurationMs}, {"min_tokens", in.MinTokens}, {"min_span_count", in.MinSpanCount}} {
+		if m.val == nil {
+			continue
+		}
+		if err := controllers.CheckMinThreshold(m.name, *m.val); err != nil {
+			return controllers.TraceFilters{}, err
+		}
+	}
+	if err := controllers.CheckFilterValue("model", in.Model); err != nil {
+		return controllers.TraceFilters{}, err
+	}
+	if err := controllers.CheckFilterValue("conversation_id", in.ConversationID); err != nil {
+		return controllers.TraceFilters{}, err
+	}
+	return controllers.TraceFilters{
+		Status:         status,
+		MinDurationMs:  in.MinDurationMs,
+		MinTokens:      in.MinTokens,
+		MinSpanCount:   in.MinSpanCount,
+		Model:          in.Model,
+		ConversationID: in.ConversationID,
+	}, nil
+}
+
+// listTraces handles list_traces: one page of trace overviews, filtered and paged by cursor.
 func listTraces(tracing *controllers.TracingController, authorize func(*gomcp.CallToolRequest) error) func(context.Context, *gomcp.CallToolRequest, listTracesInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, req *gomcp.CallToolRequest, input listTracesInput) (*gomcp.CallToolResult, any, error) {
 		if err := authorize(req); err != nil {
 			return nil, nil, err
 		}
-		scope, err := requireTraceScope(input.Organization, input.Project, input.Agent, input.Environment)
+		params, err := input.queryParams(defaultTraceListLimit, maxTraceListLimit)
 		if err != nil {
 			return nil, nil, err
 		}
-
-		startTime, endTime, err := resolveTraceTimeWindow(input.StartTime, input.EndTime)
-		if err != nil {
-			return nil, nil, err
-		}
-		sortOrder, err := validateSortOrder(input.SortOrder, "desc")
-		if err != nil {
-			return nil, nil, err
-		}
-		limit, err := validateLimit(input.Limit, defaultTraceListLimit, maxTraceListLimit)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		params := controllers.TraceQueryParams{
-			Organization: scope.Organization,
-			Project:      &scope.Project,
-			Agent:        &scope.Agent,
-			Environment:  &scope.Environment,
-			StartTime:    startTime,
-			EndTime:      endTime,
-			Limit:        limit,
-			SortOrder:    sortOrder,
+		params.Include.Models = input.IncludeModels
+		if input.Cursor != "" {
+			if params.Cursor, err = controllers.DecodeTraceCursor(input.Cursor); err != nil {
+				return nil, nil, fmt.Errorf("invalid cursor")
+			}
 		}
 
 		result, err := tracing.GetTraceOverviews(ctx, params)
@@ -181,38 +252,15 @@ func listTraces(tracing *controllers.TracingController, authorize func(*gomcp.Ca
 	}
 }
 
-func getTraces(tracing *controllers.TracingController, authorize func(*gomcp.CallToolRequest) error) func(context.Context, *gomcp.CallToolRequest, listTracesInput) (*gomcp.CallToolResult, any, error) {
-	return func(ctx context.Context, req *gomcp.CallToolRequest, input listTracesInput) (*gomcp.CallToolResult, any, error) {
+// getTraces handles get_traces: full traces with their spans, filtered.
+func getTraces(tracing *controllers.TracingController, authorize func(*gomcp.CallToolRequest) error) func(context.Context, *gomcp.CallToolRequest, tracesInput) (*gomcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *gomcp.CallToolRequest, input tracesInput) (*gomcp.CallToolResult, any, error) {
 		if err := authorize(req); err != nil {
 			return nil, nil, err
 		}
-		scope, err := requireTraceScope(input.Organization, input.Project, input.Agent, input.Environment)
+		params, err := input.queryParams(defaultTraceExportLimit, maxTraceExportLimit)
 		if err != nil {
 			return nil, nil, err
-		}
-
-		startTime, endTime, err := resolveTraceTimeWindow(input.StartTime, input.EndTime)
-		if err != nil {
-			return nil, nil, err
-		}
-		sortOrder, err := validateSortOrder(input.SortOrder, "desc")
-		if err != nil {
-			return nil, nil, err
-		}
-		limit, err := validateLimit(input.Limit, defaultTraceExportLimit, maxTraceExportLimit)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		params := controllers.TraceQueryParams{
-			Organization: scope.Organization,
-			Project:      &scope.Project,
-			Agent:        &scope.Agent,
-			Environment:  &scope.Environment,
-			StartTime:    startTime,
-			EndTime:      endTime,
-			Limit:        limit,
-			SortOrder:    sortOrder,
 		}
 
 		result, err := tracing.ExportTraces(ctx, params)

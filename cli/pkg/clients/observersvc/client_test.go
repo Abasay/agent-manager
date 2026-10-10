@@ -82,6 +82,79 @@ func TestListTraces_BuildsQueryAndDecodes(t *testing.T) {
 	}
 }
 
+func int64Ptr(i int64) *int64 { return &i }
+
+func TestListTraces_SendsFiltersAndDecodesSearchFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		for key, want := range map[string]string{
+			"status": "error", "minDurationMs": "1500", "minTokens": "0", "minSpanCount": "4",
+			"model": "gpt-4o", "conversationId": "c-1", "include": "models",
+		} {
+			if q.Get(key) != want {
+				t.Errorf("%s = %q, want %q", key, q.Get(key), want)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"traces":[],"totalCount":0,"lookedBackTo":"2026-05-12T03:00:00.5Z","truncated":true,"nextCursor":"abc"}`))
+	}))
+	defer srv.Close()
+
+	c, _ := NewClient(srv.URL)
+	resp, err := c.ListTraces(context.Background(), &ListTracesParams{
+		Organization: "acme", Project: "p", Agent: "a", Environment: "e",
+		Status: "error", MinDurationMs: int64Ptr(1500), MinTokens: int64Ptr(0), MinSpanCount: int64Ptr(4),
+		Model: "gpt-4o", ConversationID: "c-1", IncludeModels: true,
+	})
+	if err != nil {
+		t.Fatalf("ListTraces: %v", err)
+	}
+	if resp.LookedBackTo != "2026-05-12T03:00:00.5Z" || !resp.Truncated || resp.NextCursor != "abc" {
+		t.Errorf("unexpected resp: %+v", resp)
+	}
+}
+
+func TestListTraces_OmitsUnsetFilters(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		for _, key := range []string{"status", "minDurationMs", "minTokens", "minSpanCount", "model", "conversationId", "include"} {
+			if q.Has(key) {
+				t.Errorf("%s = %q, want unset", key, q.Get(key))
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(TraceOverviewResponse{})
+	}))
+	defer srv.Close()
+
+	c, _ := NewClient(srv.URL)
+	if _, err := c.ListTraces(context.Background(), &ListTracesParams{Organization: "acme"}); err != nil {
+		t.Fatalf("ListTraces: %v", err)
+	}
+}
+
+func TestExportTraces_SendsFiltersButNotInclude(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("status") != "ok" || q.Get("model") != "claude" {
+			t.Errorf("filters missing: %v", q)
+		}
+		if q.Has("include") {
+			t.Errorf("export takes no include, got %q", q.Get("include"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(TraceExportResponse{})
+	}))
+	defer srv.Close()
+
+	c, _ := NewClient(srv.URL)
+	if _, err := c.ExportTraces(context.Background(), &ExportTracesParams{
+		Organization: "acme", Status: "ok", Model: "claude", IncludeModels: true,
+	}); err != nil {
+		t.Fatalf("ExportTraces: %v", err)
+	}
+}
+
 func TestExportTraces_DecodesFullTrace(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/traces/export" {

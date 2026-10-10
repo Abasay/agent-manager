@@ -53,6 +53,13 @@ const RUN_STATUS_CHIP_COLOR_MAP: Record<
   failed: "error",
 };
 
+const RUN_STATUS_LABEL_MAP: Record<MonitorRunStatus, string> = {
+  success: "COMPLETED",
+  running: "RUNNING",
+  pending: "PENDING",
+  failed: "FAILED",
+};
+
 export interface MonitorRunDrawerProps {
   run: MonitorRunResponse;
   orgName: string;
@@ -158,7 +165,9 @@ export function MonitorRunDrawer({
               <Chip
                 size="small"
                 variant="outlined"
-                label={run.status.toUpperCase()}
+                label={
+                  RUN_STATUS_LABEL_MAP[run.status] ?? run.status.toUpperCase()
+                }
                 color={chipColor}
               />
             </Box>

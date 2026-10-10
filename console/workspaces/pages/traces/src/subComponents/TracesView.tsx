@@ -18,45 +18,68 @@
 
 import React from "react";
 import type { TraceOverview } from "@agent-management-platform/types";
+import { Alert } from "@wso2/oxygen-ui";
+import type { TraceColumn } from "../traceColumns";
 import { TracesTable } from "./TracesTable";
 
 export interface TracesViewProps {
   // Data props
   traces: TraceOverview[];
   isLoading?: boolean;
-  sortOrder?: "asc" | "desc";
   selectedTrace: string | null;
-  isLoadingOlder?: boolean;
-  isLoadingNewer?: boolean;
+  isLoadingMore?: boolean;
+  hasMore?: boolean;
+  hasActiveFilters?: boolean;
+  // The server stopped early: the examine cap with hasMore, the cursor depth cap without.
+  truncated?: boolean;
+  lookedBackTo?: string;
+  loadError?: Error | null;
+  visibleColumns?: TraceColumn[];
 
   // Handlers
   onTraceSelect: (traceId: string) => void;
-  onLoadOlder?: () => void;
-  onLoadNewer?: () => void;
+  onLoadMore?: () => Promise<boolean | undefined>;
+  onConversationSelect?: (conversationId: string) => void;
 }
 
 export const TracesView: React.FC<TracesViewProps> = ({
   traces,
   isLoading = false,
-  sortOrder = "desc",
   selectedTrace,
-  isLoadingOlder = false,
-  isLoadingNewer = false,
+  isLoadingMore = false,
+  hasMore = false,
+  hasActiveFilters = false,
+  truncated = false,
+  lookedBackTo,
+  loadError,
+  visibleColumns,
   onTraceSelect,
-  onLoadOlder,
-  onLoadNewer,
+  onLoadMore,
+  onConversationSelect,
 }) => {
   return (
-    <TracesTable
-      isLoading={isLoading}
-      sortOrder={sortOrder}
-      traces={traces}
-      onTraceSelect={onTraceSelect}
-      selectedTrace={selectedTrace}
-      isLoadingOlder={isLoadingOlder}
-      isLoadingNewer={isLoadingNewer}
-      onLoadOlder={onLoadOlder}
-      onLoadNewer={onLoadNewer}
-    />
+    <>
+      {truncated && !isLoading && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          {hasMore
+            ? "Showing matches from the traces searched so far. Narrow the time range to see more."
+            : "The list stops here: the remaining traces are more than 1,000 traces into this time range. Narrow the time range to see more."}
+        </Alert>
+      )}
+      <TracesTable
+        isLoading={isLoading}
+        traces={traces}
+        onTraceSelect={onTraceSelect}
+        selectedTrace={selectedTrace}
+        isLoadingMore={isLoadingMore}
+        hasMore={hasMore}
+        hasActiveFilters={hasActiveFilters}
+        visibleColumns={visibleColumns}
+        lookedBackTo={lookedBackTo}
+        loadError={loadError}
+        onLoadMore={onLoadMore}
+        onConversationSelect={onConversationSelect}
+      />
+    </>
   );
 };

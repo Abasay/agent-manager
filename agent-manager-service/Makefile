@@ -1,6 +1,9 @@
 export GOBIN := $(abspath ./.bin)
 export PATH := $(GOBIN):$(PATH)
 
+# Pinned dev tools (`make tools` at the repo root); puts ../.tools/bin first on PATH.
+include ../tools.mk
+
 PROJECT_ROOT := $(shell pwd)
 GO_VERSION := 1.25
 
@@ -36,10 +39,11 @@ MOQ_REQUIRED_VERSION := v0.5.3
 
 .PHONY: mocks
 mocks: ## Regenerate moq mocks only (runs every //go:generate moq directive; codegen also runs this plus wire). Usage: make mocks [PKG=./repositories/...]
-	@command -v moq >/dev/null 2>&1 || { echo "ERROR: 'moq' not found on PATH. Install: go install github.com/matryer/moq@$(MOQ_REQUIRED_VERSION)"; exit 1; }
-	@moq_version="$$(moq --version 2>&1 | awk '{print $$NF}')"; \
+	@command -v moq >/dev/null 2>&1 || { echo "ERROR: 'moq' not found on PATH. Install: make tools (repo root)"; exit 1; }
+	@# `moq --version` prints "dev" for go-installed builds; read the module version instead.
+	@moq_version="$$(go version -m "$$(command -v moq)" | awk '$$1 == "mod" {print $$3}')"; \
 	if [ "$$moq_version" != "$(MOQ_REQUIRED_VERSION)" ]; then \
-		echo "ERROR: 'moq' version $$moq_version found, but $(MOQ_REQUIRED_VERSION) is required (a different version reformats import ordering across every mock file it touches). Install: go install github.com/matryer/moq@$(MOQ_REQUIRED_VERSION)"; \
+		echo "ERROR: 'moq' version $$moq_version found, but $(MOQ_REQUIRED_VERSION) is required (a different version reformats import ordering across every mock file it touches). Install: make tools (repo root)"; \
 		exit 1; \
 	fi
 	@echo "Regenerating moq mocks in $(if $(PKG),$(PKG),$$(go list ./... | grep -v '/wiring$$'))"

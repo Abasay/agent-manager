@@ -57,7 +57,7 @@ def sample_traces():
     import os
 
     fixture_path = os.path.join(os.path.dirname(__file__), "fixtures", "sample_traces.json")
-    with open(fixture_path, "r") as f:
+    with open(fixture_path, "r", encoding="utf-8") as f:
         data = json.load(f)
         return data["traces"]
 

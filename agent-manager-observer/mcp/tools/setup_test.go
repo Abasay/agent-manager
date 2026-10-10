@@ -17,7 +17,10 @@
 package tools
 
 import (
+	"cmp"
 	"context"
+	"slices"
+	"sync"
 	"testing"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -43,7 +46,12 @@ const (
 // real controllers (and, through them, the tool handlers) can be exercised
 // end-to-end without a live upstream Observer.
 type fakeObserverClient struct {
+	mu    sync.Mutex
 	calls map[string][]any
+	// traces and spans (keyed by trace ID) are what the trace queries
+	// return; both are empty unless a test sets them.
+	traces []observer.TraceInfo
+	spans  map[string][]observer.SpanInfo
 }
 
 func newFakeObserverClient() *fakeObserverClient {
@@ -51,6 +59,8 @@ func newFakeObserverClient() *fakeObserverClient {
 }
 
 func (f *fakeObserverClient) recordCall(method string, args ...any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls[method] = append(f.calls[method], args)
 }
 
@@ -59,23 +69,52 @@ func (f *fakeObserverClient) NamespaceFor(organization string) string {
 	return "ns-" + organization
 }
 
+// QueryTraces returns the first limit traces in page order, ignoring the window.
 func (f *fakeObserverClient) QueryTraces(_ context.Context, req observer.TracesQueryRequest) (*observer.TracesQueryResponse, error) {
 	f.recordCall("QueryTraces", req)
-	return &observer.TracesQueryResponse{Traces: []observer.TraceInfo{}, Total: 0}, nil
+	traces := slices.SortedFunc(slices.Values(f.traces), func(a, b observer.TraceInfo) int {
+		c := a.StartTime.Compare(b.StartTime)
+		if req.SortOrder == nil || *req.SortOrder != "asc" {
+			c = -c
+		}
+		return cmp.Or(c, cmp.Compare(a.TraceID, b.TraceID))
+	})
+	if req.Limit != nil && *req.Limit < len(traces) {
+		traces = traces[:*req.Limit]
+	}
+	return &observer.TracesQueryResponse{Traces: append([]observer.TraceInfo{}, traces...), Total: len(f.traces)}, nil
 }
 
+// QueryTraceSpans returns the trace's spans, with attributes only when asked.
 func (f *fakeObserverClient) QueryTraceSpans(_ context.Context, traceID string, req observer.TracesQueryRequest) (*observer.TraceSpansQueryResponse, error) {
 	f.recordCall("QueryTraceSpans", traceID, req)
-	return &observer.TraceSpansQueryResponse{Spans: []observer.SpanInfo{}, Total: 0}, nil
+	spans := make([]observer.SpanInfo, 0, len(f.spans[traceID]))
+	for _, s := range f.spans[traceID] {
+		if !req.IncludeAttributes {
+			s.Attributes = nil
+		}
+		spans = append(spans, s)
+	}
+	return &observer.TraceSpansQueryResponse{Spans: spans, Total: len(spans)}, nil
 }
 
 func (f *fakeObserverClient) GetSpanDetails(_ context.Context, traceID, spanID string) (*observer.SpanDetailsResponse, error) {
 	f.recordCall("GetSpanDetails", traceID, spanID)
-	return &observer.SpanDetailsResponse{
+	resp := &observer.SpanDetailsResponse{
 		SpanID:             spanID,
 		Attributes:         map[string]interface{}{},
 		ResourceAttributes: map[string]interface{}{},
-	}, nil
+	}
+	for _, s := range f.spans[traceID] {
+		if s.SpanID == spanID {
+			resp.SpanName, resp.ParentSpanID, resp.Status = s.SpanName, s.ParentSpanID, s.Status
+			resp.StartTime, resp.EndTime = s.StartTime, s.EndTime
+			if s.Attributes != nil {
+				resp.Attributes = s.Attributes
+			}
+		}
+	}
+	return resp, nil
 }
 
 func (f *fakeObserverClient) QueryLogs(_ context.Context, req observer.LogsQueryRequest) (*observer.LogsQueryResponse, error) {

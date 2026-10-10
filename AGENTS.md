@@ -53,7 +53,8 @@ cli (amctl) ──HTTP──▶ agent-manager-service   (same API as the console
 ## Local dev environment (from repo root)
 
 ```bash
-make setup        # first-time: Colima + k3d + OpenChoreo + platform + console
+make tools        # pinned Go dev tools (codegen, linters, ginkgo) into .tools/bin; versions in tools.mk
+make setup        # first-time: tools + Colima + k3d + OpenChoreo + platform + console
 make dev-up       # start all services
 make dev-down     # stop
 make dev-logs     # tail logs

@@ -18,12 +18,13 @@
 Unit tests for TraceFetcher pagination and sample_traces.
 """
 
+import json
 from typing import List
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from amp_evaluation.trace.fetcher import TraceFetcher, sample_traces, _parse_timestamp
+from amp_evaluation.trace.fetcher import TraceFetcher, TraceLoader, sample_traces, _parse_timestamp
 
 
 def _raw_trace(trace_id: str, start_time: str) -> dict:
@@ -46,6 +47,19 @@ def _make_fetcher() -> TraceFetcher:
         environment="dev",
         token_provider=lambda: "test-token",
     )
+
+
+class TestTraceLoaderEncoding:
+    def test_loads_utf8_json_with_non_ascii_text(self, tmp_path):
+        file_path = tmp_path / "traces.json"
+        trace = _raw_trace("utf8-trace", "2026-01-01T00:00:00Z")
+        trace["rootSpanName"] = "ආයුබෝවන්"
+        file_path.write_text(json.dumps({"traces": [trace]}, ensure_ascii=False), encoding="utf-8")
+
+        traces = TraceLoader(str(file_path)).load_traces()
+
+        assert len(traces) == 1
+        assert traces[0].rootSpanName == "ආයුබෝවන්"
 
 
 def _mock_response(traces: List[dict], total_count: int) -> MagicMock:

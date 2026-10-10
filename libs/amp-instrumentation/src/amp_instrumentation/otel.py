@@ -36,6 +36,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 from ._bootstrap import constants as env_vars
+from .conversation import add_conversation_id_processor
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,9 @@ def init_otel() -> None:
     :class:`~opentelemetry.sdk.trace.export.BatchSpanProcessor` feeding an
     OTLP/HTTP exporter (``<AMP_OTEL_ENDPOINT>/v1/traces`` with the
     ``x-amp-api-key`` header), and installs it via
-    :func:`opentelemetry.trace.set_tracer_provider`.
+    :func:`opentelemetry.trace.set_tracer_provider`. It also adds a processor that
+    copies the conversation ID onto each trace's root span (see
+    :mod:`amp_instrumentation.conversation`).
 
     Idempotent: a second call is a no-op. Instruments no library — the caller is
     responsible for emitting spans (see the manual-instrumentation guide).
@@ -97,6 +100,7 @@ def init_otel() -> None:
                 )
             )
         )
+        add_conversation_id_processor(provider)
         trace.set_tracer_provider(provider)
 
         _initialized = True

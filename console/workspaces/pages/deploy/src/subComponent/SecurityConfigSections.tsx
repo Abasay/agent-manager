@@ -50,7 +50,7 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ChevronDown } from "@wso2/oxygen-ui-icons-react";
+import { ChevronDown, Info } from "@wso2/oxygen-ui-icons-react";
 import {
   forwardRef,
   useEffect,
@@ -76,6 +76,7 @@ const DEFAULT_CORS_HEADERS = ["authorization", "Content-Type", "Origin", "X-API-
 const A2A_VERSION_HEADER = "A2A-Version";
 const isA2AVersionHeader = (header: string) =>
   header.toLowerCase() === A2A_VERSION_HEADER.toLowerCase();
+const FORWARDED_TOKEN_HEADER = "x-forwarded-authorization";
 
 type TimeoutUnit = "seconds" | "minutes";
 
@@ -634,7 +635,18 @@ export const SecurityConfigSections = forwardRef<SecurityConfigHandle, SecurityC
                       disabled={disabled}
                     />
                   }
-                  label="Forward token to upstream"
+                  label={
+                    <Box display="flex" alignItems="center" gap={0.5}>
+                      Forward token to upstream
+                      <Tooltip
+                        title={`Sent to upstream as ${FORWARDED_TOKEN_HEADER} (original header removed).`}
+                      >
+                        <Box display="flex" color="text.secondary">
+                          <Info size={14} />
+                        </Box>
+                      </Tooltip>
+                    </Box>
+                  }
                 />
                 <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
                   Forward the token header to the upstream service after validation. Disable to

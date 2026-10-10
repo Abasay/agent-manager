@@ -112,10 +112,10 @@ A red emission cell is diagnosed from the run, no local repro needed:
    cell with result + a one-line detail (`category: missing <kinds>` or a
    `path` + message for a schema violation).
 2. **Per-cell JSON** — `reports/cells/<id>.json`, with the coverage map,
-   violations, and gzipped captured spans. In CI the full matrix bundles
-   these into the `matrix-reports` artifact (the gating default cell also
-   uploads `default-cell-report`); locally they're written under
-   `reports/cells/`.
+   violations, and gzipped captured spans. In CI each full-matrix shard
+   bundles these into a `matrix-reports-py<version>` artifact (the gating
+   default cell also uploads `default-cell-report`); locally they're written
+   under `reports/cells/`.
 3. **Triage diff** — `reports/diffs/<cell-id>.diff.md` lists the schema's
    required keys vs what the cell actually captured. `nox -s report`
    generates these for failing cells.

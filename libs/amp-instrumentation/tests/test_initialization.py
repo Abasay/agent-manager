@@ -18,8 +18,11 @@
 
 import os
 import pytest
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
 from amp_instrumentation._bootstrap import initialization
 from amp_instrumentation._bootstrap import constants as env_vars
+from amp_instrumentation.conversation import ConversationIdSpanProcessor
 
 
 class TestGetRequiredEnvVar:
@@ -106,3 +109,46 @@ class TestInitializeInstrumentation:
         assert mock_traceloop.initialized is True
         assert "resource_attributes" in mock_traceloop.init_kwargs
         assert mock_traceloop.init_kwargs["resource_attributes"] == {}
+
+
+class TestConversationIdProcessor:
+    """Test that the auto path registers the conversation ID processor."""
+
+    def test_registered_once_on_traceloops_provider_after_init(
+        self, clean_environment, mock_traceloop, monkeypatch
+    ):
+        """Test the processor is added to the global provider once, after Traceloop.init()."""
+        os.environ[env_vars.AMP_OTEL_ENDPOINT] = "https://otel.example.com"
+        os.environ[env_vars.AMP_AGENT_API_KEY] = "test-key"
+
+        provider = TracerProvider()
+        added = []
+        add_span_processor = provider.add_span_processor
+
+        def spy(processor):
+            added.append((processor, mock_traceloop.initialized))
+            add_span_processor(processor)
+
+        monkeypatch.setattr(provider, "add_span_processor", spy)
+        monkeypatch.setattr(trace, "get_tracer_provider", lambda: provider)
+
+        for _ in range(2):
+            monkeypatch.setattr(initialization, "_initialized", False)
+            initialization.initialize_instrumentation()
+
+        assert [type(p) for p, _ in added] == [ConversationIdSpanProcessor]
+        assert added[0][1] is True
+        assert "processor" not in mock_traceloop.init_kwargs
+
+    def test_provider_without_span_processors_is_skipped(
+        self, clean_environment, mock_traceloop, monkeypatch
+    ):
+        """Test init still succeeds when Traceloop left no SDK provider behind."""
+        os.environ[env_vars.AMP_OTEL_ENDPOINT] = "https://otel.example.com"
+        os.environ[env_vars.AMP_AGENT_API_KEY] = "test-key"
+        monkeypatch.setattr(trace, "get_tracer_provider", trace.ProxyTracerProvider)
+        monkeypatch.setattr(initialization, "_initialized", False)
+
+        initialization.initialize_instrumentation()
+
+        assert mock_traceloop.initialized is True

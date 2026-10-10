@@ -22,6 +22,13 @@ from pydantic import BaseModel
 
 from agent.crew import create_crew
 
+# Present when the platform runs the agent under amp-instrument; absent in a
+# plain local run.
+try:
+    from traceloop.sdk import Traceloop
+except ImportError:
+    Traceloop = None
+
 app = FastAPI()
 # Load environment variables from a .env file (if present) for local runs; in
 # the deployed pod the platform injects OPENAI_API_KEY as a sensitive env var.
@@ -39,5 +46,10 @@ class ChatRequest(BaseModel):
 # 422 (not an opaque 500) when `message` is missing, matching openapi.yaml.
 @app.post("/chat")
 def chat(payload: ChatRequest):
+    # Tags every span the crew starts with the session, so the Traces page can
+    # group a conversation's traces. It is set in this request's copy of the
+    # context, so it doesn't carry over to other requests.
+    if Traceloop is not None:
+        Traceloop.set_association_properties({"session_id": payload.session_id})
     result = crew.kickoff(inputs={"question": payload.message})
     return JSONResponse(content={"response": str(result)})

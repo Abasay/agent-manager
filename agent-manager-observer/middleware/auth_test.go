@@ -17,6 +17,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -156,5 +157,34 @@ func TestJWTAuthForMCP_AdvertisesPathSpecificMetadata(t *testing.T) {
 	want := `Bearer realm="agent-manager-observer", resource_metadata="https://traces.amp.example.com/.well-known/oauth-protected-resource/mcp"`
 	if got := rec.Header().Get("WWW-Authenticate"); got != want {
 		t.Fatalf("expected WWW-Authenticate %q, got %q", want, got)
+	}
+}
+
+func TestJWTAuth_StoresBearerTokenInContext(t *testing.T) {
+	token := devToken(t, time.Now().Add(time.Hour))
+	for name, mw := range map[string]func(config.AuthConfig) func(http.Handler) http.Handler{
+		"JWTAuth":       JWTAuth,
+		"JWTAuthForMCP": JWTAuthForMCP,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var got string
+			handler := mw(config.AuthConfig{IsLocalDevEnv: true})(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				got = BearerTokenFromContext(r.Context())
+			}))
+
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/traces", nil)
+			r.Header.Set("Authorization", "Bearer "+token)
+			handler.ServeHTTP(httptest.NewRecorder(), r)
+
+			if got != token {
+				t.Errorf("expected bearer token in context, got %q", got)
+			}
+		})
+	}
+}
+
+func TestBearerTokenFromContext_Absent(t *testing.T) {
+	if got := BearerTokenFromContext(context.Background()); got != "" {
+		t.Errorf("expected empty token, got %q", got)
 	}
 }

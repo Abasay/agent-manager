@@ -93,7 +93,7 @@ window.__RUNTIME_CONFIG__ = {
     enableUserManagement: 'true' === 'true',
     enableAgentIdentity: true,
   },
-  docsUrl: 'https://wso2.github.io/agent-manager/docs/latest',
+  docsUrl: 'https://wso2.com/agent-platform/docs/latest/',
   footerLinks: {
     privacyPolicyUrl: 'https://wso2.com/agent-platform/agent-manager/',
     termsOfUseUrl: 'https://wso2.com/agent-platform/agent-manager/',

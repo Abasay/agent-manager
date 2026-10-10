@@ -12,20 +12,21 @@ HTTP → RequestLogger → CORS → mux ┬→ /health                          
                                    └→ JWTAuth → /mcp, /mcp/ → mcp/tools/ → controllers/ (same as above, no HTTP hop)
 ```
 
-`RequestLogger` and `CORS` wrap the whole server. `JWTAuth` wraps both the `apiMux` mounted at `/api/v1/*` and the `am-obs-mcp` streamable-HTTP MCP server mounted at `/mcp` and `/mcp/` — both on the root mux (`main.go`). `/health` and the well-known route are registered on the bare mux and are **unauthenticated**. Unlike `/api/v1/logs`, `/api/v1/build-logs` and `/api/v1/metrics`, `/mcp` is **not** wrapped by `middleware.RejectPublisherAudience` — publisher-audience tokens may call it.
+`RequestLogger` and `CORS` wrap the whole server. `JWTAuth` wraps both the `apiMux` mounted at `/api/v1/*` and the `am-obs-mcp` streamable-HTTP MCP server mounted at `/mcp` and `/mcp/` — both on the root mux (`app/app.go`). `/health` and the well-known route are registered on the bare mux and are **unauthenticated**. Unlike `/api/v1/logs`, `/api/v1/build-logs` and `/api/v1/metrics`, `/mcp` is **not** wrapped by `middleware.RejectPublisherAudience` — publisher-audience tokens may call it.
 
 - **`handlers/`** — parse/validate the request, extract path params, call the controller, write the response. Client-facing errors are generic (`"Failed to retrieve …"`); real detail is logged server-side.
 - **`controllers/`** — orchestration + enrichment. Fetches trace overviews, then fans out to fetch span details and aggregates input/output/token usage.
 - **`observer/`** — the typed HTTP client to the upstream Observer (`QueryTraces`, `QueryTraceSpans`, `GetSpanDetails`), plus auth token management and response→`opensearch.Span` conversion.
 - **`opensearch/`** — pure span-parsing logic. Extracts input/output from spans; branches by vendor (CrewAI via `crewai.*` attributes vs LangChain/Traceloop via `traceloop.entity.*`).
 - **`config/`** — env-var config loading + startup validation.
-- **`mcp/`** — the `am-obs-mcp` streamable-HTTP MCP server (`mcp/setup.go`) and its seven tools (`mcp/tools/`): `get_runtime_logs`, `get_build_logs`, `get_metrics`, `list_traces`, `get_traces`, `get_trace_details`, `get_span_details`. Tool handlers call `controllers.TracingController`/`controllers.ObservabilityController` directly — no HTTP hop, no claims parsing. Every tool takes an explicit, required `organization` input except `get_span_details` (its controller call is scoped by trace/span ID alone).
+- **`mcp/`** — the `am-obs-mcp` streamable-HTTP MCP server (`mcp/setup.go`) and its seven tools (`mcp/tools/`): `get_runtime_logs`, `get_build_logs`, `get_metrics`, `list_traces`, `get_traces`, `get_trace_details`, `get_span_details`. Tool handlers call `controllers.TracingController`/`controllers.ObservabilityController` directly — no HTTP hop, no claims parsing. Every tool takes an explicit, required `organization` input except `get_span_details` (its controller call is scoped by trace/span ID alone). `list_traces` and `get_traces` take the list filters as snake_case inputs (`status`, `min_duration_ms`, `min_tokens`, `min_span_count`, `model`, `conversation_id`), checked by the same `controllers` validators as the HTTP handler; `list_traces` also takes `include_models` and `cursor`.
 
 ## File map
 
 | Need | Location |
 |---|---|
-| Entry point / server + route table | `main.go` |
+| Entry point (client-credentials token source) | `main.go` |
+| Server + route table, shared with cloud via `app.Run` | `app/app.go` |
 | HTTP handlers, path parsing | `handlers/handlers.go` |
 | Orchestration + enrichment | `controllers/controller.go` |
 | Observer client (interface + impl) | `observer/client.go`, `observer/types.go` |
@@ -39,7 +40,7 @@ HTTP → RequestLogger → CORS → mux ┬→ /health                          
 
 ## Routing
 
-Plain `http.ServeMux` in `main.go`. Dynamic segments (`/api/v1/traces/{traceId}/spans/{spanId}`) are parsed **by hand** with `strings.CutPrefix`/`Index` in the handlers — `pathSegment()` rejects any segment containing `/` (path-traversal guard). When you add a nested route, extend that manual dispatch; there is no path-param router.
+Plain `http.ServeMux` in `app/app.go`. Dynamic segments (`/api/v1/traces/{traceId}/spans/{spanId}`) are parsed **by hand** with `strings.CutPrefix`/`Index` in the handlers — `pathSegment()` rejects any segment containing `/` (path-traversal guard). When you add a nested route, extend that manual dispatch; there is no path-param router.
 
 `/mcp` and `/mcp/` are registered on the same root mux via `mcp.RegisterRoute(mux, deps, middleware.JWTAuth(cfg.Auth))` — a streamable-HTTP MCP server (`github.com/modelcontextprotocol/go-sdk`), not a REST route, so it isn't in `docs/openapi.yaml`. Tool input schemas are auto-inferred from the Go input structs (`jsonschema` struct tags): a field is schema-required unless it has `,omitempty`.
 
@@ -98,7 +99,52 @@ The intended rule (not yet enforced): the caller's org identity from the JWT mus
 - **Errors** — wrap with a `pkg.Func:` prefix and `%w`: `fmt.Errorf("observer.QueryTraces: %w", err)`.
 - **Context** — every I/O call takes `context.Context` first and propagates it. **Never pass `nil` as the context** — always pass `r.Context()` or a context derived from it (`context.WithCancel`/`WithTimeout`); a `nil` context panics downstream.
 - **Logging** — `slog` (JSON). Use the request-scoped logger via `logger.WithLogger`/`GetLogger(ctx)`. The request logger currently attaches `method`, `path`, `remote_addr`, `status`, `duration`. Per the platform rule, request-scoped logs should carry correlation context — when you log inside a trace query, add the identifiers you have (`organization`, trace/span IDs, request ID) so entries are traceable. Upstream partial failures are logged as warnings, not fatal.
-- **Concurrency in enrichment** — the controller uses a **two-tier semaphore** (outer: max 10 concurrent traces; inner: max 50 concurrent span fetches). Do not collapse to one pool — it prevents deadlock. Enrichment short-circuits once fields are filled, skips leaf aggregation above 100 spans, and caps leaf fetches at 50 (`TokenUsage.Partial=true` when truncated). The export path uses `context.WithCancel` + `atomic.Bool` for fail-fast.
+- **Concurrency in enrichment** — the controller uses a **two-tier semaphore** (outer: max 10 concurrent traces; inner: max 50 concurrent span fetches). Do not collapse to one pool — it prevents deadlock. See [Trace enrichment and filtering](#trace-enrichment-and-filtering).
+
+## Trace enrichment and filtering
+
+All in `controllers/controller.go`.
+
+### Enrichment
+
+- Short-circuits once the fields are filled.
+- Skips leaf aggregation above **100 spans**.
+- Caps leaf fetches at **50**; sets `TokenUsage.Partial=true` when it hits the cap.
+- With `include=models` (or a `model` filter), below 100 spans the span list is fetched with inline attributes:
+  - Chain and leaf steps read their spans from it instead of calling `GetSpanDetails`.
+  - The root comes from it too, unless a root filter is set — so a trace costs one span-list call.
+  - The leaf cap still applies, so a row's tokens match with the flag on or off.
+
+### Filtered list
+
+Filters run as early as possible, so a rejected trace stays cheap:
+
+- **`status`** — `matchesStatus`, right after the root fetch. A rejected trace costs one call.
+- **`conversationId`** — the ID comes from the root, then the child and leaf spans (`ExtractConversationID`). Without the filter only spans enrichment reads anyway are checked, so it costs no extra call. With it, a root with another ID rejects the trace after one call. A root without one, even a complete one, leaves the trace open: another ID on the child rejects it before the leaf fetches, and a trace with no ID is read in full and left out. A failed read the ID depends on (the span list, the child, or a leaf ahead of the first ID) lists the trace as failed, not as having no ID.
+- **`model`** — `matchesModel`, as soon as the span list gives the models, before the child and leaf fetches. Traces over 100 spans have no models, so they're rejected after the root fetch.
+
+The walk stops at the 500-trace examine cap or after **20 s** (`listLookBackBudget`), returning `truncated` and a `nextCursor`. The budget doesn't cut the first chunk; only the **25 s** request deadline (`requestTimeout`) does, failing the request. After it, the walk's fetches run under the budget, which cancels those in flight without a warning; the walk then stops before the chunk they belong to.
+
+A trace that can't be read is retried once, then left out. The list fails, filtered or not, when it could read none of the traces it examined. A trace a filter rejected after reading it counts as read.
+
+### Export
+
+- **No filter** — one `QueryTraces` call.
+- **Filtered** — selects traces with `lookBackForMatches`, then fetches full spans only for the matches. Selection has no cursor, the same 500-trace examine cap, and a **10 s** budget that leaves the rest of the 25 s `requestTimeout` for the span fetches. An export still running at `requestTimeout` fails.
+- Uses the same filter criteria as the list, but the shorter budget and no paging can cover a different part of history, so it may not select the same traces.
+
+Retried once:
+
+- Selection: a failed root fetch, or a failed span list under a `model` or `minTokens` filter.
+- Span phase: a failed `QueryTraceSpans`.
+
+Response flags:
+
+- `truncated` — the search stopped early, or a trace hit the **10 000** span cap.
+- `spansTruncated` — the span cap only, so a client can tell the two apart.
+- `failedTraceIds` — traces left out because they still failed after the retry, had no root span, or fell short of `minTokens` with leaf spans unread (past the cap or failed).
+
+The export fails only when `ctx` is done or it could read none of the traces it selected.
 
 ## Gotchas
 

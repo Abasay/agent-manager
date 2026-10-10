@@ -444,6 +444,7 @@ thunder:
       clientId: "amctl"
       name: "AMCTL"
       description: "AMP CLI application for interactive user login"
+      logoUrl: "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Pulse-Orange.webp"
       redirectUris:
         - "http://127.0.0.1:10325/callback"
       grantTypes:
@@ -458,6 +459,7 @@ thunder:
       publicClient: true
       accessTokenValidityPeriod: 3600
       idTokenValidityPeriod: 3600
+      refreshTokenValidityPeriod: 2592000
       userAttributes:
         - "given_name"
         - "family_name"
@@ -471,6 +473,7 @@ thunder:
       clientId: "am-mcp"
       name: "AMP MCP"
       description: "AMP MCP application for interactive user login"
+      logoUrl: "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Pulse-Orange.webp"
       redirectUris:
         - "http://127.0.0.1:33418/callback"
         - "http://localhost:33418/callback"
@@ -486,6 +489,7 @@ thunder:
       publicClient: true
       accessTokenValidityPeriod: 3600
       idTokenValidityPeriod: 3600
+      refreshTokenValidityPeriod: 2592000
       userAttributes:
         - "given_name"
         - "family_name"
@@ -504,6 +508,7 @@ thunder:
       clientId: "am-obs-mcp"
       name: "AMP Observer MCP"
       description: "AMP Observer MCP application for interactive user login"
+      logoUrl: "https://wso2.cachefly.net/wso2/sites/all/image_resources/logos/WSO2-Pulse-Orange.webp"
       redirectUris:
         - "http://127.0.0.1:33419/callback"
         - "http://localhost:33419/callback"
@@ -519,6 +524,7 @@ thunder:
       publicClient: true
       accessTokenValidityPeriod: 3600
       idTokenValidityPeriod: 3600
+      refreshTokenValidityPeriod: 2592000
       # OIDC scopes only — the four observability data-read scopes are
       # appended from observabilityScopes at template render time
       # (73-am-obs-mcp-client.yaml).
@@ -578,6 +584,7 @@ thunder:
       publicClient: true
       accessTokenValidityPeriod: 3600
       idTokenValidityPeriod: 3600
+      refreshTokenValidityPeriod: 2592000
       userAttributes:
         - "given_name"
         - "family_name"

@@ -19,9 +19,13 @@ jobs:
       - name: Setup Go
         uses: ./.github/actions/setup-go
 
+      - name: Install pinned lint tools (tools.mk)
+        run: make tools-lint
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
+          install-mode: none
           working-directory: agent-manager-service
           args: --config .github/linters/.golangci.yaml
 
@@ -183,17 +187,8 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install wire
-        run: go install github.com/google/wire/cmd/wire@v0.7.0
-
-      - name: Install goimports
-        run: go install golang.org/x/tools/cmd/goimports@latest
-
-      - name: Install gofumpt
-        run: go install mvdan.cc/gofumpt@latest
-
-      - name: Install moq
-        run: go install github.com/matryer/moq@v0.5.3
+      - name: Install pinned codegen tools (tools.mk)
+        run: make tools-codegen
 
       - name: Run code generation and format check
         working-directory: ./agent-manager-service

@@ -92,27 +92,30 @@ jobs:
     runs-on:
       - codebuild-wso2_agent-manager-${{ github.run_id }}-${{ github.run_attempt }}
     needs: verify-contract-and-manifest
+    # One shard per interpreter: on a single runner the full matrix outgrew the
+    # runner's lifetime and the job was killed before it could upload any
+    # reports. Keep this list in sync with `python` in matrix.yaml.
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
-          python-version: |
-            3.10
-            3.11
-            3.12
-            3.13
+          python-version: ${{ matrix.python }}
       # pyyaml here is for the outer nox process — see comment above on
       # default-cell-required. Per-cell venvs install their own pyyaml.
       - run: pip install nox pyyaml
-      - name: Run full emission matrix
+      - name: Run emission shard
         working-directory: test/instrumentation-matrix
-        run: nox -s emission
+        run: nox -s emission -- --python-version=${{ matrix.python }}
         continue-on-error: true   # advisory; default-cell-required is the gating job
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: matrix-reports
+          name: matrix-reports-py${{ matrix.python }}
           path: test/instrumentation-matrix/reports/
 
   publish-matrix-summary:
@@ -130,9 +133,13 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install nox pyyaml
+      # Merge every shard's reports into one tree. Each cell writes its own
+      # reports/cells/<cell-id>.json, so shards never collide. A shard whose
+      # runner died uploads nothing; the summary still builds from the rest.
       - uses: actions/download-artifact@v8
         with:
-          name: matrix-reports
+          pattern: matrix-reports-*
+          merge-multiple: true
           path: test/instrumentation-matrix/reports/
       - name: Build summary
         working-directory: test/instrumentation-matrix

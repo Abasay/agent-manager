@@ -1,4 +1,4 @@
-.PHONY: help setup setup-colima setup-k3d setup-openchoreo setup-default-env-thunder setup-sandbox setup-gvisor setup-kata setup-platform setup-gateway setup-console-local setup-console-local-force setup-amp teardown-amp reset-amp dev-up dev-down dev-restart dev-rebuild dev-logs dev-migrate openchoreo-up openchoreo-down openchoreo-status thunder-up thunder-down thunder-restart thunder-reset teardown db-connect db-logs service-logs service-shell console-logs port-forward stop-port-forward gen-eval-artifacts gen-instrumentation-contract check-contract-drift check-matrix-manifest e2e-test security-test security-test-static security-test-live
+.PHONY: help tools setup setup-colima setup-k3d setup-openchoreo setup-default-env-thunder setup-sandbox setup-gvisor setup-kata setup-platform setup-gateway setup-console-local setup-console-local-force setup-amp teardown-amp reset-amp dev-up dev-down dev-restart dev-rebuild dev-logs dev-migrate openchoreo-up openchoreo-down openchoreo-status thunder-up thunder-down thunder-restart thunder-reset teardown db-connect db-logs service-logs service-shell console-logs port-forward stop-port-forward gen-eval-artifacts gen-instrumentation-contract check-contract-drift check-matrix-manifest e2e-test security-test security-test-static security-test-live
 
 # Absolute path to the console directory on the host. Passed to docker-compose
 # so the container mounts and builds at the same path, keeping pnpm
@@ -10,7 +10,8 @@ help:
 	@echo "Agent Manager Platform - Development Commands"
 	@echo ""
 	@echo "🚀 Setup (run once):"
-	@echo "  make setup                   - Complete setup (Colima + k3d + OpenChoreo + Platform)"
+	@echo "  make tools                   - Install pinned Go dev tools into .tools/bin (see tools.mk)"
+	@echo "  make setup                   - Complete setup (tools + Colima + k3d + OpenChoreo + Platform)"
 	@echo "  make setup-colima            - Start Colima VM"
 	@echo "  make setup-k3d              - Create k3d cluster"
 	@echo "  make setup-openchoreo        - Install OpenChoreo on k3d"
@@ -75,8 +76,12 @@ help:
 	@echo "  make teardown           - Remove everything (Kind cluster + platform)"
 	@echo ""
 
+# Pinned Go-written dev tools (codegen, linters, test runners).
+# Included after help so help stays the default goal.
+include tools.mk
+
 # Complete setup
-setup: setup-colima setup-k3d setup-openchoreo setup-platform setup-sandbox setup-console-local
+setup: tools setup-colima setup-k3d setup-openchoreo setup-console-local setup-platform setup-sandbox
 	@$(MAKE) dev-migrate
 	@cd deployments/setup && ./port-forward.sh --platform --background
 	@$(MAKE) setup-default-env-thunder
@@ -339,14 +344,8 @@ console-logs:
 	@docker logs -f agent-manager-console
 
 # amctl CLI client codegen (oapi-codegen against local OpenAPI spec)
-# Pinned to the same version used in .github/workflows/cli-codegen-check.yaml
-OAPI_CODEGEN_VERSION := v2.6.0
-
+# oapi-codegen comes from `make tools`, pinned to match .github/workflows/cli-codegen-check.yaml
 amctl-gen-client:
-	@if ! command -v oapi-codegen >/dev/null || ! oapi-codegen -version 2>&1 | grep -qx '$(OAPI_CODEGEN_VERSION)'; then \
-		echo "Installing oapi-codegen $(OAPI_CODEGEN_VERSION)..."; \
-		go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION); \
-	fi
 	@oapi-codegen -config cli/pkg/clients/amsvc/gen/oapi-codegen.yaml agent-manager-service/docs/api_v1_openapi.yaml
 	@oapi-codegen -config cli/pkg/clients/amsvc/gen/oapi-codegen-client.yaml agent-manager-service/docs/api_v1_openapi.yaml
 	@echo "amctl client generated successfully"

@@ -102,6 +102,8 @@ data:
             idToken:
               validityPeriod: {{ .Values.thunder.bootstrap.ampConsoleClient.idTokenValidityPeriod }}
               userAttributes: {{ .Values.thunder.bootstrap.ampConsoleClient.userAttributes | toJson }}
+            refreshToken:
+              validityPeriod: {{ .Values.thunder.bootstrap.ampConsoleClient.refreshTokenValidityPeriod | int }}
 
   54-workload-publisher-app.yaml: |
     resource_type: application
@@ -206,7 +208,10 @@ data:
     name: {{ .Values.thunder.bootstrap.amCliClient.name | quote }}
     description: {{ .Values.thunder.bootstrap.amCliClient.description | quote }}
     ouId: "01900000-0000-7000-8000-000000000001"
+    logoUrl: {{ .Values.thunder.bootstrap.amCliClient.logoUrl | quote }}
     authFlowHandle: default-flow
+    themeId: amp-console-theme
+    layoutId: {{ .Values.thunder.bootstrap.ampConsoleLayout.id | quote }}
     allowedUserTypes: {{ .Values.thunder.bootstrap.amCliClient.allowedUserTypes | toJson }}
     inboundAuthConfig:
       - type: oauth2
@@ -227,6 +232,8 @@ data:
             idToken:
               validityPeriod: {{ .Values.thunder.bootstrap.amCliClient.idTokenValidityPeriod }}
               userAttributes: {{ .Values.thunder.bootstrap.amCliClient.userAttributes | toJson }}
+            refreshToken:
+              validityPeriod: {{ .Values.thunder.bootstrap.amCliClient.refreshTokenValidityPeriod | int }}
 
   {{- /* am-mcp may request every amp scope EXCEPT the observability data-read
        scopes (thunder.bootstrap.observabilityScopes) — those belong exclusively
@@ -244,7 +251,10 @@ data:
     name: {{ .Values.thunder.bootstrap.amMcpClient.name | quote }}
     description: {{ .Values.thunder.bootstrap.amMcpClient.description | quote }}
     ouId: "01900000-0000-7000-8000-000000000001"
+    logoUrl: {{ .Values.thunder.bootstrap.amMcpClient.logoUrl | quote }}
     authFlowHandle: default-flow
+    themeId: amp-console-theme
+    layoutId: {{ .Values.thunder.bootstrap.ampConsoleLayout.id | quote }}
     allowedUserTypes: {{ .Values.thunder.bootstrap.amMcpClient.allowedUserTypes | toJson }}
     inboundAuthConfig:
       - type: oauth2
@@ -265,6 +275,8 @@ data:
             idToken:
               validityPeriod: {{ .Values.thunder.bootstrap.amMcpClient.idTokenValidityPeriod }}
               userAttributes: {{ .Values.thunder.bootstrap.amMcpClient.userAttributes | toJson }}
+            refreshToken:
+              validityPeriod: {{ .Values.thunder.bootstrap.amMcpClient.refreshTokenValidityPeriod | int }}
 
   60-amp-resource-server.yaml: |
     resource_type: resource_server
@@ -1316,7 +1328,10 @@ data:
     name: {{ .Values.thunder.bootstrap.amObsMcpClient.name | quote }}
     description: {{ .Values.thunder.bootstrap.amObsMcpClient.description | quote }}
     ouId: "01900000-0000-7000-8000-000000000001"
+    logoUrl: {{ .Values.thunder.bootstrap.amObsMcpClient.logoUrl | quote }}
     authFlowHandle: default-flow
+    themeId: amp-console-theme
+    layoutId: {{ .Values.thunder.bootstrap.ampConsoleLayout.id | quote }}
     allowedUserTypes: {{ .Values.thunder.bootstrap.amObsMcpClient.allowedUserTypes | toJson }}
     inboundAuthConfig:
       - type: oauth2
@@ -1337,3 +1352,5 @@ data:
             idToken:
               validityPeriod: {{ .Values.thunder.bootstrap.amObsMcpClient.idTokenValidityPeriod }}
               userAttributes: {{ .Values.thunder.bootstrap.amObsMcpClient.userAttributes | toJson }}
+            refreshToken:
+              validityPeriod: {{ .Values.thunder.bootstrap.amObsMcpClient.refreshTokenValidityPeriod | int }}

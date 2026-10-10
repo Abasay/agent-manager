@@ -22,9 +22,13 @@ jobs:
       - name: Setup Go
         uses: ./.github/actions/setup-go
 
+      - name: Install pinned lint tools (tools.mk)
+        run: make tools-lint
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
+          install-mode: none
           working-directory: agent-manager-observer
 
   test:

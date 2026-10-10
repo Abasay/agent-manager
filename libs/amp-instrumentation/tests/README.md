@@ -33,6 +33,7 @@ open htmlcov/index.html
 ## Test Files
 
 - `test_cli.py` - CLI functionality and argument handling
+- `test_conversation.py` - Conversation ID span processor
 - `test_initialization.py` - Instrumentation setup and configuration
 - `conftest.py` - Shared test fixtures and setup
 

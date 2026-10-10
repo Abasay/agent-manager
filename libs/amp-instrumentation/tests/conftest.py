@@ -80,6 +80,32 @@ def configure_environment(clean_environment, set_env_vars) -> Dict[str, str]:
 
 
 @pytest.fixture
+def record_processors(monkeypatch):
+    """
+    Fixture returning a function that records the span processors added to a provider.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture
+
+    Returns:
+        Function taking a TracerProvider and returning the list its processors land in
+    """
+
+    def record(provider) -> list:
+        added = []
+        add_span_processor = provider.add_span_processor
+
+        def spy(processor) -> None:
+            added.append(processor)
+            add_span_processor(processor)
+
+        monkeypatch.setattr(provider, "add_span_processor", spy)
+        return added
+
+    return record
+
+
+@pytest.fixture
 def mock_traceloop(monkeypatch):
     """
     Fixture to mock the Traceloop SDK to avoid actual initialization during tests.

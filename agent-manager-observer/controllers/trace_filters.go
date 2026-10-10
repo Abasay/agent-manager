@@ -1,0 +1,205 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package controllers
+
+import (
+	"fmt"
+	"log/slog"
+	"slices"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/wso2/agent-manager/agent-manager-observer/observer"
+	"github.com/wso2/agent-manager/agent-manager-observer/opensearch"
+)
+
+// TraceStatusFilter selects traces by error status.
+type TraceStatusFilter string
+
+const (
+	TraceStatusAny   TraceStatusFilter = ""
+	TraceStatusError TraceStatusFilter = "error"
+	TraceStatusOK    TraceStatusFilter = "ok"
+)
+
+// MaxFilterValueLen caps the model and conversationId filters, in characters.
+const MaxFilterValueLen = 256
+
+// TraceFilters holds trace-list filters; set fields combine with AND.
+// Min* are pointers so an explicit 0 still filters.
+type TraceFilters struct {
+	Status         TraceStatusFilter
+	MinDurationMs  *int64
+	MinTokens      *int64
+	MinSpanCount   *int64
+	Model          string
+	ConversationID string
+}
+
+// ParseTraceStatus accepts an empty status, "error" or "ok".
+func ParseTraceStatus(s string) (TraceStatusFilter, error) {
+	switch status := TraceStatusFilter(s); status {
+	case TraceStatusAny, TraceStatusError, TraceStatusOK:
+		return status, nil
+	default:
+		return TraceStatusAny, fmt.Errorf("status must be 'error' or 'ok'")
+	}
+}
+
+// CheckMinThreshold rejects a negative threshold filter.
+func CheckMinThreshold(name string, v int64) error {
+	if v < 0 {
+		return fmt.Errorf("%s must be a non-negative integer", name)
+	}
+	return nil
+}
+
+// CheckFilterValue rejects a string filter longer than MaxFilterValueLen characters.
+func CheckFilterValue(name, s string) error {
+	if utf8.RuneCountInString(s) > MaxFilterValueLen {
+		return fmt.Errorf("%s must be at most %d characters", name, MaxFilterValueLen)
+	}
+	return nil
+}
+
+// IsZero reports whether no filter is set.
+func (f TraceFilters) IsZero() bool {
+	return f == TraceFilters{}
+}
+
+// SummaryOnly reports whether only filters the trace list answers are set.
+func (f TraceFilters) SummaryOnly() bool {
+	return !f.IsZero() && f == TraceFilters{MinDurationMs: f.MinDurationMs, MinSpanCount: f.MinSpanCount}
+}
+
+// LogValue logs only the set filters.
+func (f TraceFilters) LogValue() slog.Value {
+	var attrs []slog.Attr
+	if f.Status != TraceStatusAny {
+		attrs = append(attrs, slog.String("status", string(f.Status)))
+	}
+	for _, m := range []struct {
+		key string
+		val *int64
+	}{{"minDurationMs", f.MinDurationMs}, {"minTokens", f.MinTokens}, {"minSpanCount", f.MinSpanCount}} {
+		if m.val != nil {
+			attrs = append(attrs, slog.Int64(m.key, *m.val))
+		}
+	}
+	if f.Model != "" {
+		attrs = append(attrs, slog.String("model", f.Model))
+	}
+	if f.ConversationID != "" {
+		attrs = append(attrs, slog.String("conversationId", f.ConversationID))
+	}
+	return slog.GroupValue(attrs...)
+}
+
+// matchesFilters reports whether overview satisfies f.
+func matchesFilters(overview opensearch.TraceOverview, f TraceFilters) bool {
+	if !matchesStatus(overview.Status, f) || !matchesConversation(overview.ConversationID, f) {
+		return false
+	}
+	if !matchesSummary(overview.DurationInNanos, overview.SpanCount, f) {
+		return false
+	}
+	if !matchesMinTokens(overview.TokenUsage, f) {
+		return false
+	}
+	return matchesModel(overview.Models, f)
+}
+
+// matchesMinTokens checks the minTokens filter; a trace with no token usage fails it.
+func matchesMinTokens(tokens *opensearch.TokenUsage, f TraceFilters) bool {
+	return f.MinTokens == nil || (tokens != nil && int64(tokens.TotalTokens) >= *f.MinTokens)
+}
+
+// matchesModel checks the model filter; a trace with no models fails it.
+func matchesModel(models []string, f TraceFilters) bool {
+	return f.Model == "" || slices.ContainsFunc(models, containsFold(f.Model))
+}
+
+// matchesStatus checks the status filter, which the root span alone answers.
+func matchesStatus(status *opensearch.TraceStatus, f TraceFilters) bool {
+	hasErrors := status != nil && status.ErrorCount > 0
+	switch f.Status {
+	case TraceStatusError:
+		return hasErrors
+	case TraceStatusOK:
+		return !hasErrors
+	}
+	return true
+}
+
+// matchesConversation checks the conversationId filter; a trace with no conversation ID fails it.
+func matchesConversation(conversationID string, f TraceFilters) bool {
+	return f.ConversationID == "" || conversationID == f.ConversationID
+}
+
+// conversationRulesOut reports whether a conversation ID found so far fails
+// the filter. "" doesn't, since a later span may carry one.
+func conversationRulesOut(conversationID string, f TraceFilters) bool {
+	return conversationID != "" && !matchesConversation(conversationID, f)
+}
+
+// conversationPending reports whether a conversationId filter still lacks the trace's ID.
+func conversationPending(conversationID string, f TraceFilters) bool {
+	return f.ConversationID != "" && conversationID == ""
+}
+
+// containsFold reports whether a model name contains sub, ignoring case.
+func containsFold(sub string) func(string) bool {
+	sub = strings.ToLower(sub)
+	return func(model string) bool { return strings.Contains(strings.ToLower(model), sub) }
+}
+
+// matchesSummary checks the filters the trace list alone can answer.
+func matchesSummary(durationNs int64, spanCount int, f TraceFilters) bool {
+	// Compare in ms to avoid overflow.
+	if f.MinDurationMs != nil && durationNs/int64(time.Millisecond) < *f.MinDurationMs {
+		return false
+	}
+	if f.MinSpanCount != nil && int64(spanCount) < *f.MinSpanCount {
+		return false
+	}
+	return true
+}
+
+// summaryChunkLen is the shortest prefix of traces holding need survivors.
+func summaryChunkLen(traces []observer.TraceInfo, f TraceFilters, need int) int {
+	for i, t := range traces {
+		if matchesSummary(t.DurationNs, t.SpanCount, f) {
+			need--
+			if need == 0 {
+				return i + 1
+			}
+		}
+	}
+	return len(traces)
+}
+
+// filterTraceInfos drops traces the summary already rules out, before enrichment.
+func filterTraceInfos(traces []observer.TraceInfo, f TraceFilters) []observer.TraceInfo {
+	matched := make([]observer.TraceInfo, 0, len(traces))
+	for _, t := range traces {
+		if matchesSummary(t.DurationNs, t.SpanCount, f) {
+			matched = append(matched, t)
+		}
+	}
+	return matched
+}

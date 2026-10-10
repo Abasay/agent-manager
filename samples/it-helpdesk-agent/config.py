@@ -115,15 +115,14 @@ class Config:
     llm_provider_url: str
     llm_provider_key: str
     use_mcp: bool
-    mcp_servers: tuple[McpServer, ...]
+    mcp_url: str
+    mcp_api_key: str
     mcp_oauth: bool
     agentid_client_id: str
     agentid_client_secret: str
     agentid_token_endpoint: str
     agentid_scopes: str
-    issue_tracker_repos: tuple[str, ...]
-    jira_project_key: str
-    jira_cloud_id: str
+    issue_tracker_repo: str
 
     @property
     def agentid_ready(self) -> bool:
@@ -132,32 +131,6 @@ class Config:
             and self.agentid_client_secret
             and self.agentid_token_endpoint
         )
-
-    def mcp_server(self, name: str) -> McpServer | None:
-        for server in self.mcp_servers:
-            if server.name == name:
-                return server
-        return None
-
-    # Kept so any code written against the single-repo config still works.
-    @property
-    def issue_tracker_repo(self) -> str:
-        return self.issue_tracker_repos[0] if self.issue_tracker_repos else ""
-
-    # Kept so any code written against the single-server config still works.
-    @property
-    def mcp_url(self) -> str:
-        server = self.mcp_server("github") or (
-            self.mcp_servers[0] if self.mcp_servers else None
-        )
-        return server.url if server else ""
-
-    @property
-    def mcp_api_key(self) -> str:
-        server = self.mcp_server("github") or (
-            self.mcp_servers[0] if self.mcp_servers else None
-        )
-        return server.api_key if server else ""
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -183,29 +156,34 @@ class Config:
                     "USE_LLM_PROVIDER is true but LLM_PROVIDER_KEY is not set"
                 )
 
-        use_mcp = _flag("USE_MCP")
 
-        # With MCP_OAUTH=true the proxies are reached with an AgentID bearer token
-        # instead of an API key, for proxies whose Security tab is set to OAuth.
+        use_mcp = _env("USE_MCP", "false").lower() == "true"
+        mcp_url = _env("GITHUB_MCP_URL", "")
+        mcp_api_key = _env("GITHUB_MCP_API_KEY", "")
+
+        # With MCP_OAUTH=true the proxy is reached with an AgentID bearer token
+        # instead of an API key — for a proxy whose Security tab is set to OAuth.
         # The AMP_AGENTID_* vars are injected by Agent Manager into every
         # platform-hosted agent's pod; they are not validated here because
         # provisioning finishes asynchronously after deploy.
-        mcp_oauth = _flag("MCP_OAUTH")
+        mcp_oauth = _env("MCP_OAUTH", "false").lower() == "true"
 
-        mcp_servers = _load_mcp_servers(use_mcp, mcp_oauth)
-        enabled = {s.name for s in mcp_servers}
+        # Which repository holds the IT team's known-issue tracker. Without this the
+        # agent would search issues across the whole of GitHub, which is both slow
+        # and wrong — a match in someone else's project is not a known issue here.
+        issue_tracker_repo = _env("ISSUE_TRACKER_REPO", "")
 
-        # Which repositories hold the IT team's known-issue trackers, as a
-        # comma-separated list of owner/repo. Only required when the github server
-        # is enabled. ISSUE_TRACKER_REPOS is preferred; the older single-repo
-        # ISSUE_TRACKER_REPO is still read. Without a list the agent would search
-        # issues across the whole of GitHub, which is both slow and wrong.
-        issue_tracker_repos: tuple[str, ...] = ()
-        if "github" in enabled:
-            issue_tracker_repos = _parse_repos(
-                _env("ISSUE_TRACKER_REPOS", "") or _env("ISSUE_TRACKER_REPO", "")
-            )
-            if not issue_tracker_repos:
+        if use_mcp:
+            if not mcp_url:
+                raise RuntimeError("USE_MCP is true but GITHUB_MCP_URL is not set")
+            if not mcp_oauth and not mcp_api_key:
+                raise RuntimeError("USE_MCP is true but GITHUB_MCP_API_KEY is not set")
+            if not issue_tracker_repo:
+                raise RuntimeError(
+                    "USE_MCP is true but ISSUE_TRACKER_REPO is not set "
+                    "(expected owner/repo, e.g. acme/it-tooling)"
+                )
+            if "/" not in issue_tracker_repo:
                 raise RuntimeError(
                     "The github MCP server is enabled but ISSUE_TRACKER_REPOS is not "
                     "set (expected owner/repo, comma-separated, e.g. "
@@ -232,13 +210,12 @@ class Config:
             llm_provider_url=llm_provider_url,
             llm_provider_key=llm_provider_key,
             use_mcp=use_mcp,
-            mcp_servers=mcp_servers,
+            mcp_url=mcp_url,
+            mcp_api_key=mcp_api_key,
             mcp_oauth=mcp_oauth,
             agentid_client_id=_env("AMP_AGENTID_CLIENT_ID", ""),
             agentid_client_secret=_env("AMP_AGENTID_CLIENT_SECRET", ""),
             agentid_token_endpoint=_env("AMP_AGENTID_TOKEN_ENDPOINT", ""),
             agentid_scopes=_env("AMP_AGENTID_SCOPES", ""),
-            issue_tracker_repos=issue_tracker_repos,
-            jira_project_key=jira_project_key,
-            jira_cloud_id=jira_cloud_id,
+            issue_tracker_repo=issue_tracker_repo,
         )

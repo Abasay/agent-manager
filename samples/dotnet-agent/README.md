@@ -51,7 +51,7 @@ The spans carry the OpenTelemetry GenAI attributes AMP's observer reads:
 `gen_ai.agent.name`, `gen_ai.request.model`, `gen_ai.tool.name`,
 `gen_ai.usage.input_tokens` / `output_tokens`, and the input and output messages
 when content capture is on. The full list is in
-[the contract](https://wso2.github.io/agent-manager/docs/latest/guides/amp-instrumentation/#the-contract).
+[the contract](https://wso2.com/agent-platform/docs/latest/guides/amp-instrumentation/#the-contract).
 
 ## Prerequisites
 
@@ -86,7 +86,7 @@ see a `10.x` version).
 ## Run it
 
 Register the agent in the AMP Console first and generate its API key. See
-[Register an externally-hosted agent](https://wso2.github.io/agent-manager/docs/latest/tutorials/create-your-first-agent/#register-an-externally-hosted-agent).
+[Register an externally-hosted agent](https://wso2.com/agent-platform/docs/latest/tutorials/create-your-first-agent/#register-an-externally-hosted-agent).
 That gives you the OTLP endpoint and the `AMP_AGENT_API_KEY`.
 
 Then set the environment variables and run it:

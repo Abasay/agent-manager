@@ -980,12 +980,14 @@ Jobs:
    release-config). Gates the rest.
 2. `default-cell-required` — runs only the `defaultCell`. The required status
    check on the PR.
-3. `full-emission-matrix` — runs `nox -s emission` (every cell; advisory,
-   `continue-on-error`).
+3. `full-emission-matrix` — runs every cell, sharded into one parallel job
+   per Python version (`nox -s emission -- --python-version=<v>`); advisory,
+   `continue-on-error`.
 4. `publish-matrix-summary` — needs `full-emission-matrix` +
-   `default-cell-required`; aggregates `reports/cells/*.json` and renders the
-   summary table to the job's GitHub step-summary page (not a PR comment —
-   fork PRs get a read-only token that can't comment).
+   `default-cell-required`; merges the shard artifacts, aggregates
+   `reports/cells/*.json` and renders the summary table to the job's GitHub
+   step-summary page (not a PR comment — fork PRs get a read-only token that
+   can't comment).
 5. `scan-cassettes-for-secrets` — greps committed cassettes for leaked keys.
 
 A required check on `full-emission-matrix` overall would let a single advisory

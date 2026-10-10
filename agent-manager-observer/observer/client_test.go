@@ -278,3 +278,43 @@ func TestQueryMetrics(t *testing.T) {
 		t.Errorf("expected CpuRequests nil (absent from JSON), got %+v", resp.CpuRequests)
 	}
 }
+
+type stubTokenProvider struct {
+	token       string
+	invalidated int
+}
+
+func (s *stubTokenProvider) GetToken(context.Context) (string, error) { return s.token, nil }
+func (s *stubTokenProvider) InvalidateToken()                         { s.invalidated++ }
+
+func TestNewClient_UsesInjectedTokenProvider(t *testing.T) {
+	var gotAuth []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+		if len(gotAuth) == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"spans": []}`))
+	}))
+	defer srv.Close()
+
+	tp := &stubTokenProvider{token: "caller-jwt"}
+	client := NewClient(srv.URL, tp, "default")
+
+	if _, err := client.QueryTraceSpans(context.Background(), "trace-1", TracesQueryRequest{}); err != nil {
+		t.Fatalf("QueryTraceSpans returned error: %v", err)
+	}
+	if len(gotAuth) != 2 {
+		t.Fatalf("expected 2 upstream calls (401 then retry), got %d", len(gotAuth))
+	}
+	for i, h := range gotAuth {
+		if h != "Bearer caller-jwt" {
+			t.Errorf("call %d: expected Authorization %q, got %q", i+1, "Bearer caller-jwt", h)
+		}
+	}
+	if tp.invalidated != 1 {
+		t.Errorf("expected InvalidateToken once after 401, got %d", tp.invalidated)
+	}
+}

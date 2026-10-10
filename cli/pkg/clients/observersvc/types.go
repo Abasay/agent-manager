@@ -78,11 +78,16 @@ type TraceOverview struct {
 	Status          *TraceStatus `json:"status,omitempty"`
 	Input           any          `json:"input,omitempty"`
 	Output          any          `json:"output,omitempty"`
+	Models          []string     `json:"models,omitempty"`
+	ConversationID  string       `json:"conversationId,omitempty"`
 }
 
 type TraceOverviewResponse struct {
-	Traces     []TraceOverview `json:"traces"`
-	TotalCount int             `json:"totalCount"`
+	Traces       []TraceOverview `json:"traces"`
+	TotalCount   int             `json:"totalCount"`
+	LookedBackTo string          `json:"lookedBackTo"`
+	Truncated    bool            `json:"truncated"`
+	NextCursor   string          `json:"nextCursor,omitempty"`
 }
 
 type Span struct {
@@ -109,9 +114,12 @@ type FullTrace struct {
 }
 
 type TraceExportResponse struct {
-	Traces     []FullTrace `json:"traces"`
-	TotalCount int         `json:"totalCount"`
-	Truncated  bool        `json:"truncated"`
+	Traces         []FullTrace `json:"traces"`
+	TotalCount     int         `json:"totalCount"`
+	LookedBackTo   string      `json:"lookedBackTo,omitempty"`
+	Truncated      bool        `json:"truncated"`
+	SpansTruncated bool        `json:"spansTruncated"`
+	FailedTraceIDs []string    `json:"failedTraceIds,omitempty"`
 }
 
 type SpanSummary struct {
@@ -138,6 +146,18 @@ type ListTracesParams struct {
 	EndTime      time.Time
 	Limit        *int
 	SortOrder    *string
+
+	// Filters run server-side and AND together. Min* are pointers so an
+	// explicit 0 still filters.
+	Status         string
+	MinDurationMs  *int64
+	MinTokens      *int64
+	MinSpanCount   *int64
+	Model          string
+	ConversationID string
+
+	// IncludeModels fills TraceOverview.Models; only ListTraces sends it.
+	IncludeModels bool
 }
 
 type ExportTracesParams = ListTracesParams

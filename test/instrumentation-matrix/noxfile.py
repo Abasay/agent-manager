@@ -34,9 +34,14 @@ def emission(session, cell):
     """Run one emission-tier cell."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--cell-id", default=None)
+    # Shards the matrix by interpreter so CI can fan the cells out across
+    # parallel jobs (one per Python version) instead of one long serial run.
+    parser.add_argument("--python-version", default=None)
     args, _ = parser.parse_known_args(session.posargs)
     if args.cell_id and cell.id != args.cell_id:
         session.skip(f"filtered out by --cell-id={args.cell_id}")
+    if args.python_version and cell.python != args.python_version:
+        session.skip(f"filtered out by --python-version={args.python_version}")
 
     provider = PROVIDERS[cell.provider_name]
     venv_dir = HERE / ".nox" / cell.id

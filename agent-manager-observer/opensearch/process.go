@@ -21,7 +21,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -675,6 +677,76 @@ func ExtractTokenUsage(spans []Span) *TokenUsage {
 func IsLLMLeafSpan(spanName string) bool {
 	lower := strings.ToLower(strings.TrimSpace(spanName))
 	return strings.HasSuffix(lower, ".chat") || lower == "chat" || strings.HasPrefix(lower, "chat ")
+}
+
+// conversationIDKeys name a span's conversation, in the order they're read.
+// langsmith.trace.session_id is left out: it names a LangSmith project.
+var conversationIDKeys = []string{
+	"gen_ai.conversation.id",                           // OTel GenAI, Google ADK, Traceloop @conversation
+	"session.id",                                       // OpenInference, Strands trace_attributes
+	"langfuse.session.id",                              // Langfuse SDK
+	"traceloop.association.properties.session_id",      // Traceloop associations, LangChain metadata
+	"traceloop.association.properties.conversation_id", // LangChain metadata
+	"traceloop.association.properties.thread_id",       // LangGraph thread via LangChain metadata
+	"langsmith.metadata.session_id",                    // LangSmith threads
+	"langsmith.metadata.thread_id",                     // LangSmith threads
+}
+
+// ExtractConversationID returns the first conversationIDKeys value on the
+// span: a non-empty string, or a whole number such as an int thread_id.
+// "" when absent.
+func ExtractConversationID(span *Span) string {
+	if span == nil {
+		return ""
+	}
+	for _, key := range conversationIDKeys {
+		switch v := span.Attributes[key].(type) {
+		case string:
+			if v != "" {
+				return v
+			}
+		case float64:
+			if v == math.Trunc(v) {
+				return strconv.FormatFloat(v, 'f', -1, 64)
+			}
+		}
+	}
+	return ""
+}
+
+// ExtractModels returns the distinct LLMData.Model values across processed
+// spans, in first-seen order. Nil when no span names a model.
+func ExtractModels(spans []Span) []string {
+	var models []string
+	seen := make(map[string]struct{})
+	for i := range spans {
+		model := llmModel(&spans[i])
+		if model == "" {
+			continue
+		}
+		if _, dup := seen[model]; dup {
+			continue
+		}
+		seen[model] = struct{}{}
+		models = append(models, model)
+	}
+	return models
+}
+
+// llmModel returns the LLMData.Model of a processed span, or "".
+func llmModel(span *Span) string {
+	if span.AmpAttributes == nil {
+		return ""
+	}
+	switch d := span.AmpAttributes.Data.(type) {
+	case LLMData:
+		return d.Model
+	case *LLMData:
+		if d != nil {
+			return d.Model
+		}
+	}
+	return ""
 }
 
 // ExtractInputPreviewFromLeaf returns a short preview of the user-facing

@@ -69,7 +69,7 @@ With a Pinecone key, the first start creates the `hotel-policies` index and inge
 
 ## Step 2a: Run it platform-hosted (internal agent)
 
-Follow [Create a platform-hosted agent](https://wso2.github.io/agent-manager/docs/latest/tutorials/create-your-first-agent/#create-a-platform-hosted-agent) for the full walkthrough. In the Default project, click **Add Agent**, choose **Platform-Hosted Agent**, and use these values:
+Follow [Create a platform-hosted agent](https://wso2.com/agent-platform/docs/latest/tutorials/create-your-first-agent/#create-a-platform-hosted-agent) for the full walkthrough. In the Default project, click **Add Agent**, choose **Platform-Hosted Agent**, and use these values:
 
 | Field | Value |
 |---|---|
@@ -97,9 +97,9 @@ Then click **Deploy** and wait for the build to finish.
 
 ## Step 2b: Run it externally-hosted (external agent)
 
-First register the agent and generate its API key. Follow [Register an externally-hosted agent](https://wso2.github.io/agent-manager/docs/latest/tutorials/create-your-first-agent/#register-an-externally-hosted-agent). That gives you the OTLP endpoint and the `AMP_AGENT_API_KEY`.
+First register the agent and generate its API key. Follow [Register an externally-hosted agent](https://wso2.com/agent-platform/docs/latest/tutorials/create-your-first-agent/#register-an-externally-hosted-agent). That gives you the OTLP endpoint and the `AMP_AGENT_API_KEY`.
 
-Then install the agent with the [AMP instrumentation package](https://wso2.github.io/agent-manager/docs/latest/guides/amp-instrumentation/) and run it through `amp-instrument`:
+Then install the agent with the [AMP instrumentation package](https://wso2.com/agent-platform/docs/latest/guides/amp-instrumentation/) and run it through `amp-instrument`:
 
 ```bash
 cd samples/hotel-booking-agent/agent

@@ -13,6 +13,7 @@ Nine in-process tools over mock JSON cover the core helpdesk flows. On top of th
 | Capability | Why it's here |
 |---|---|
 | `USE_MCP` toggle loading tools from an MCP proxy | Chapter 3 connects the agent to GitHub through an Agent Manager MCP proxy |
+| `MCP_OAUTH` toggle for AgentID auth to that proxy | The agent mints a `client_credentials` token scoped to the proxy URL and sends it as a bearer token instead of an API key |
 | Known-issue triage rules in the system prompt | The agent checks the IT team's issue tracker before opening a ticket, and may only read it |
 | Session memory (LangGraph checkpointer) | Multi-turn "verify me, then act" flows work across turns |
 | `AGENT_VERSION` echoed in `/health` and every chat response | Makes a promotion or rollback visible from the outside |
@@ -37,9 +38,11 @@ All configuration is environment variables. Only the LLM credential is required.
 | `LLM_PROVIDER_URL` / `LLM_PROVIDER_KEY` | — | Injected by Agent Manager; required when `USE_LLM_PROVIDER=true` |
 | `USE_MCP` | `false` | Load tools from an MCP proxy in addition to the in-process ones |
 | `GITHUB_MCP_URL` / `GITHUB_MCP_API_KEY` | — | Injected by Agent Manager when the `GitHub` MCP proxy is attached (set these names under **Environment Variable Names** when attaching; the console defaults to `GITHUB_URL` / `GITHUB_API_KEY`); required when `USE_MCP=true` |
+| `MCP_OAUTH` | `false` | Authenticate to the MCP proxy with the agent's AgentID (OAuth 2.0 bearer token) instead of an API key. Use when the proxy's **Security** tab is set to **OAuth**; `GITHUB_MCP_API_KEY` is then not needed |
+| `AMP_AGENTID_CLIENT_ID` / `AMP_AGENTID_CLIENT_SECRET` / `AMP_AGENTID_TOKEN_ENDPOINT` / `AMP_AGENTID_SCOPES` | — | Injected by Agent Manager into every platform-hosted agent; used when `MCP_OAUTH=true`. If they are not set yet, the agent starts without MCP tools |
 | `ISSUE_TRACKER_REPO` | — | `owner/repo` of the IT team's known-issue tracker. Required when `USE_MCP=true`; issue searches are scoped to it |
 
-`LLM_PROVIDER_*` and `GITHUB_*` are **system-managed** — Agent Manager writes them
+`LLM_PROVIDER_*`, `GITHUB_*` and `AMP_AGENTID_*` are **system-managed** — Agent Manager writes them
 per environment and they are read-only in the console. You never paste an upstream
 OpenAI or GitHub credential into the agent.
 
@@ -84,6 +87,7 @@ Engineering account; `david.kim@acmecorp.com` / `E-1004` is an admin account.
 
 ```
 agent.py               LLM binding, system prompt, MCP tool loading, checkpointer
+agent_identity.py      AgentID token minting for MCP_OAUTH=true
 app.py                 FastAPI app — /chat and /health
 config.py              Environment configuration
 main.py                Entrypoint (python main.py)
@@ -97,4 +101,4 @@ scripts/seed_traffic.py  Scripted conversations for seeding traces
 
 The tutorial series covers deployment, model governance, MCP tools, evaluation,
 and promotion to production, in that order. Start at
-[Create Your First Agent](https://wso2.github.io/agent-manager/docs/tutorials/create-your-first-agent).
+[Create Your First Agent](https://wso2.com/agent-platform/docs/latest/tutorials/create-your-first-agent).

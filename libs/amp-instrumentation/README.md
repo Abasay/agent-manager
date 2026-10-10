@@ -16,6 +16,7 @@ For agents on a custom or non-frontier framework, or anywhere you want full cont
 - **Flexible Configuration**: Configure via environment variables
 - **Framework Agnostic**: Works with any Python application built using a wide range of agent frameworks supported by the TraceLoop SDK
 - **Manual path**: `init_otel()` for agents that emit their own OpenTelemetry GenAI spans
+- **Conversation on the root span**: the conversation ID is copied onto each trace's root span, so the Agent Manager can list and filter traces by conversation cheaply. See [Conversation ID](#conversation-id)
 
 ## Installation
 
@@ -58,6 +59,23 @@ amp-instrument uv run python script.py
 
 That's it! Your application is now instrumented and sending traces to the WSO2 Agent Manager.
 
+## Conversation ID
+
+Frameworks such as LangGraph record the conversation (for example the `thread_id`) on the spans they create, not on a server span or your own agent span that wraps them. Both `amp-instrument` and `init_otel()` add a span processor that copies it onto the trace's root span as `gen_ai.conversation.id`, while the root is still open.
+
+The processor reads each span that ends, in this order, and takes the first non-empty string (an integer becomes its decimal string; booleans and floats are ignored):
+
+1. `gen_ai.conversation.id`
+2. `session.id`
+3. `langfuse.session.id`
+4. `traceloop.association.properties.session_id`
+5. `traceloop.association.properties.conversation_id`
+6. `traceloop.association.properties.thread_id`
+7. `langsmith.metadata.session_id`
+8. `langsmith.metadata.thread_id`
+
+It never overwrites an existing ID: a root that already has any of these attributes is left alone, and the first ID found is kept. There is nothing to configure. If the root span has a remote parent (your agent is called by another service that sends a `traceparent`), the attribute is set on your local root, but the trace's own root lives in the calling service and has to carry the ID itself.
+
 ## Manual instrumentation
 
 If your agent uses a framework the Traceloop SDK doesn't cover — or you want to emit your own spans — instrument it yourself and send the spans to AMP. `init_otel()` configures the OpenTelemetry exporter (the same `AMP_OTEL_ENDPOINT` / `AMP_AGENT_API_KEY` environment variables as above); it does no instrumentation itself, so you control the spans:
@@ -82,6 +100,6 @@ with tracer.start_as_current_span("chat") as span:
     span.set_attribute("gen_ai.usage.output_tokens", response.usage.output_tokens)
 ```
 
-Spans that follow AMP's instrumentation contract — the OpenTelemetry GenAI semantic conventions — render with the full trace view in the Agent Manager and run through evaluators; spans that don't still appear, just without the rich view. The contract and the full supported-attribute reference are published in the WSO2 Agent Manager documentation: see [Manual instrumentation](https://wso2.github.io/agent-manager/docs/latest/guides/amp-instrumentation/#manual-instrumentation) on the WSO2 Agent Manager Instrumentation page.
+Spans that follow AMP's instrumentation contract — the OpenTelemetry GenAI semantic conventions — render with the full trace view in the Agent Manager and run through evaluators; spans that don't still appear, just without the rich view. The contract and the full supported-attribute reference are published in the WSO2 Agent Manager documentation: see [Manual instrumentation](https://wso2.com/agent-platform/docs/latest/guides/amp-instrumentation/#manual-instrumentation) on the WSO2 Agent Manager Instrumentation page.
 
 `init_otel()` is idempotent and is roughly ten lines of vanilla OpenTelemetry SDK setup (`TracerProvider` + `BatchSpanProcessor` + an OTLP/HTTP exporter to `<AMP_OTEL_ENDPOINT>/v1/traces` with the `x-amp-api-key` header) — use it so you don't have to write that yourself.

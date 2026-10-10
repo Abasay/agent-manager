@@ -300,6 +300,25 @@ class TestJSONLoading:
         assert len(loaded_task.expected_trajectory) == 1
         assert loaded_task.expected_trajectory[0].tool == "test_tool"
 
+    def test_loads_utf8_json_with_non_ascii_text(self, tmp_path):
+        """Test loading UTF-8 dataset content independently of the platform default encoding."""
+        input_text = "ආයුබෝවන්"
+        input_file = tmp_path / "utf8_dataset.json"
+        input_file.write_text(
+            json.dumps(
+                {
+                    "name": "UTF-8 Dataset",
+                    "tasks": [{"task_id": "utf8-task", "input": input_text}],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        dataset = load_dataset_from_json(str(input_file))
+
+        assert dataset.tasks[0].input == input_text
+
     def test_load_nonexistent_file(self):
         """Test loading from nonexistent file."""
         with pytest.raises(FileNotFoundError):
@@ -406,7 +425,7 @@ class TestIntegration:
         output_file = tmp_path / "versioned.json"
         save_dataset_to_json(dataset, str(output_file))
 
-        with open(output_file) as f:
+        with output_file.open(encoding="utf-8") as f:
             data = json.load(f)
 
         assert "schema_version" in data

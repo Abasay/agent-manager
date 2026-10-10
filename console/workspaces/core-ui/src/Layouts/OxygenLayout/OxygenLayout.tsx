@@ -25,7 +25,7 @@ import {
   UserMenu,
 } from "@wso2/oxygen-ui";
 import { generatePath, Outlet, useNavigate, useParams } from "react-router-dom";
-import { Settings } from "@wso2/oxygen-ui-icons-react";
+import { LogOut, Settings } from "@wso2/oxygen-ui-icons-react";
 import { ProfileDrawer } from "./ProfileDrawer";
 import { useAuthHooks } from "@agent-management-platform/auth";
 import { Logo, useExternalComponentModules } from "@agent-management-platform/views";
@@ -35,6 +35,15 @@ import { useNavigationItems } from "./navigationItems";
 import { TopNavigation } from "./TopNavigation";
 import { useGetUserProfile, useListOrganizations } from "@agent-management-platform/api-client";
 import { MountPoints } from "../../types";
+
+// Oxygen UI's UserMenu treats a non-URL `avatar` string as literal initials
+// text (see getUserMenuAvatarProps), so this doubles as the no-picture
+// fallback: first letter of each of the first two words, e.g. "John Doe" -> "JD".
+function getUserAvatarInitials(fullName: string): string {
+  const words = fullName.trim().split(/\s+/).filter(Boolean);
+  const initials = words.slice(0, 2).map((word) => word.charAt(0)).join("");
+  return (initials || "U").toUpperCase();
+}
 
 export function OxygenLayout() {
   const [collapsed, setCollapsed] = useState(false);
@@ -63,10 +72,17 @@ export function OxygenLayout() {
     });
   }, [organizations]);
 
+  const fullName = [userInfo?.givenName, userInfo?.familyName]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+
   const user = {
-    primaryLine: userInfo?.givenName ?? userInfo?.username ?? "User",
+    primaryLine: fullName || userInfo?.username || "User",
     secondaryLine: userInfo?.orgName ?? userInfo?.email ?? userInfo?.username ?? userInfo?.givenName ?? "",
   };
+
+  const avatar = userProfile?.attributes?.picture || getUserAvatarInitials(user.primaryLine);
 
   const navigationItems = useNavigationItems();
   const mainItems = navigationItems.filter((item) => item.type === "item");
@@ -125,12 +141,12 @@ export function OxygenLayout() {
               <UserMenu>
                 <UserMenu.Trigger
                   name={user.primaryLine}
-                  avatar={userProfile?.attributes?.picture}
+                  avatar={avatar}
                 />
                 <UserMenu.Header
                   name={user.primaryLine}
                   email={user.secondaryLine}
-                  avatar={userProfile?.attributes?.picture}
+                  avatar={avatar}
                 />
                 <UserMenu.Divider />
                 {orgId && (
@@ -140,7 +156,7 @@ export function OxygenLayout() {
                     onClick={() => setProfileOpen(true)}
                   />
                 )}
-                <UserMenu.Logout onClick={handleLogout} />
+                <UserMenu.Logout icon={<LogOut />} label="Sign out" onClick={handleLogout} />
               </UserMenu>
             </Header.Actions>
           </Header>

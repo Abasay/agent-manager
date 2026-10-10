@@ -40,10 +40,8 @@ import (
 type Toolsets struct {
 	Tracing       *controllers.TracingController
 	Observability *controllers.ObservabilityController
-	// authorize builds each tool's per-call guard. Nil is the production
-	// wiring; only in-package tests set it, to exercise input handling over the
-	// in-memory transport, which carries no Authorization header for the real
-	// guard to read.
+	// authorize, when set, builds each tool's per-call guard in place of the
+	// enforcing one.
 	authorize func(rbac.Permission) func(*gomcp.CallToolRequest) error
 }
 
@@ -57,7 +55,7 @@ func (t *Toolsets) guard(perm rbac.Permission) func(*gomcp.CallToolRequest) erro
 }
 
 // Register wires every tool onto server. Toolsets left nil are skipped, so
-// partial wiring (e.g. in tests) is safe.
+// partial wiring is safe.
 func (t *Toolsets) Register(server *gomcp.Server) {
 	if t == nil {
 		return

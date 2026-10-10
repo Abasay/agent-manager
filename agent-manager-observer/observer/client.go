@@ -49,15 +49,23 @@ type Client interface {
 	NamespaceFor(organization string) string
 }
 
+// TokenProvider supplies the bearer token sent to the observer upstream.
+type TokenProvider interface {
+	GetToken(ctx context.Context) (string, error)
+	InvalidateToken()
+}
+
+var _ TokenProvider = (*AuthProvider)(nil)
+
 type clientImpl struct {
 	baseURL          string
-	authProvider     *AuthProvider
+	authProvider     TokenProvider
 	httpClient       *http.Client
 	defaultNamespace string
 }
 
 // NewClient creates a new observer service client.
-func NewClient(baseURL string, auth *AuthProvider, defaultNamespace string) Client {
+func NewClient(baseURL string, auth TokenProvider, defaultNamespace string) Client {
 	return &clientImpl{
 		baseURL:          baseURL,
 		authProvider:     auth,

@@ -58,6 +58,7 @@ agent-manager-service/agent-manager-service
 
 # Make build artifacts
 .make/
+.tools/
 .kube/
 
 # Helm

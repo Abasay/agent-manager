@@ -108,6 +108,7 @@ func (c *Client) do(ctx context.Context, method, path string, q url.Values, out 
 	return nil
 }
 
+// setCommonParams sets the scope, paging and filter params ListTraces and ExportTraces share.
 func setCommonParams(q url.Values, p *ListTracesParams) {
 	if p.Organization != "" {
 		q.Set("organization", p.Organization)
@@ -128,6 +129,25 @@ func setCommonParams(q url.Values, p *ListTracesParams) {
 	if p.SortOrder != nil && *p.SortOrder != "" {
 		q.Set("sortOrder", *p.SortOrder)
 	}
+	if p.Status != "" {
+		q.Set("status", p.Status)
+	}
+	setOptionalInt64(q, "minDurationMs", p.MinDurationMs)
+	setOptionalInt64(q, "minTokens", p.MinTokens)
+	setOptionalInt64(q, "minSpanCount", p.MinSpanCount)
+	if p.Model != "" {
+		q.Set("model", p.Model)
+	}
+	if p.ConversationID != "" {
+		q.Set("conversationId", p.ConversationID)
+	}
+}
+
+// setOptionalInt64 sets key only when val is non-nil.
+func setOptionalInt64(q url.Values, key string, val *int64) {
+	if val != nil {
+		q.Set(key, strconv.FormatInt(*val, 10))
+	}
 }
 
 func setTimeRange(q url.Values, start, end time.Time) {
@@ -142,6 +162,9 @@ func setTimeRange(q url.Values, start, end time.Time) {
 func (c *Client) ListTraces(ctx context.Context, p *ListTracesParams) (*TraceOverviewResponse, error) {
 	q := url.Values{}
 	setCommonParams(q, p)
+	if p.IncludeModels {
+		q.Set("include", "models")
+	}
 	var out TraceOverviewResponse
 	if err := c.do(ctx, http.MethodGet, "/api/v1/traces", q, &out); err != nil {
 		return nil, err

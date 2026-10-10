@@ -51,9 +51,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: go mod verify
 
-      - name: Install staticcheck
+      - name: Install pinned lint tools (tools.mk)
         if: ${{ !cancelled() }}
-        run: go install honnef.co/go/tools/cmd/staticcheck@2026.1
+        working-directory: .
+        run: make tools-lint
 
       - name: Run staticcheck
         if: ${{ !cancelled() }}

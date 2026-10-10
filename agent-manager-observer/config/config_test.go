@@ -165,3 +165,37 @@ func TestLoad_OAuthConfigured(t *testing.T) {
 		t.Errorf("expected ScopesSupported %v, got %v", wantScopes, cfg.Auth.ScopesSupported)
 	}
 }
+
+func TestLoad_DoesNotRequireClientCredentials(t *testing.T) {
+	t.Setenv("OPENCHOREO_OBSERVER_URL", "http://localhost:8085")
+	t.Setenv("IS_LOCAL_DEV_ENV", "true")
+	t.Setenv("IDP_TOKEN_URL", "")
+	t.Setenv("IDP_CLIENT_ID", "")
+	t.Setenv("IDP_CLIENT_SECRET", "")
+
+	if _, err := Load(); err != nil {
+		t.Fatalf("expected no error without IDP settings, got %v", err)
+	}
+}
+
+func TestObserverConfig_ValidateClientCredentials(t *testing.T) {
+	valid := ObserverConfig{TokenURL: "http://idp/token", ClientID: "id", ClientSecret: "secret"}
+	if err := valid.ValidateClientCredentials(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	tests := map[string]func(*ObserverConfig){
+		"missing token URL":     func(c *ObserverConfig) { c.TokenURL = "" },
+		"missing client ID":     func(c *ObserverConfig) { c.ClientID = " " },
+		"missing client secret": func(c *ObserverConfig) { c.ClientSecret = "" },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			c := valid
+			mutate(&c)
+			if err := c.ValidateClientCredentials(); err == nil {
+				t.Error("expected error, got nil")
+			}
+		})
+	}
+}

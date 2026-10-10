@@ -2140,3 +2140,197 @@ func TestExtractTokenUsageSurvivesParentCycle(t *testing.T) {
 		t.Errorf("expected 10 input tokens without hanging, got %+v", usage)
 	}
 }
+
+// ExtractConversationID reads the conversation keys off any span, not only
+// those classified as agent spans: a Traceloop workflow root and a CrewAI root
+// both go through parsers that do not populate AgentData.
+func TestExtractConversationID(t *testing.T) {
+	tests := []struct {
+		name  string
+		span  *Span
+		want  string
+		kinds []SpanType
+	}{
+		{
+			name: "agent root via AgentData",
+			span: &Span{Name: "invoke_agent", Attributes: map[string]interface{}{
+				"gen_ai.operation.name":  "invoke_agent",
+				"gen_ai.conversation.id": "conv-agent",
+			}},
+			want:  "conv-agent",
+			kinds: []SpanType{SpanTypeAgent},
+		},
+		{
+			name: "traceloop workflow root falls back to the raw attribute",
+			span: &Span{Name: "LangGraph.workflow", Attributes: map[string]interface{}{
+				"traceloop.span.kind":    "workflow",
+				"gen_ai.conversation.id": "conv-workflow",
+			}},
+			want:  "conv-workflow",
+			kinds: []SpanType{SpanTypeChain},
+		},
+		{
+			name: "crewai root falls back to the raw attribute",
+			span: &Span{Name: "Crew.kickoff", Attributes: map[string]interface{}{
+				"traceloop.span.kind":    "agent",
+				"gen_ai.system":          "crewai",
+				"crewai.agent.role":      "Researcher",
+				"gen_ai.conversation.id": "conv-crew",
+			}},
+			want:  "conv-crew",
+			kinds: []SpanType{SpanTypeAgent},
+		},
+		{
+			name: "openinference session",
+			span: &Span{Name: "agent", Attributes: map[string]interface{}{"session.id": "sess-oi"}},
+			want: "sess-oi",
+		},
+		{
+			name: "langfuse session",
+			span: &Span{Name: "agent", Attributes: map[string]interface{}{"langfuse.session.id": "sess-lf"}},
+			want: "sess-lf",
+		},
+		{
+			name: "traceloop session association property",
+			span: &Span{Name: "agent", Attributes: map[string]interface{}{
+				"traceloop.association.properties.session_id": "sess-tl",
+			}},
+			want: "sess-tl",
+		},
+		{
+			name: "traceloop conversation association property",
+			span: &Span{Name: "agent", Attributes: map[string]interface{}{
+				"traceloop.association.properties.conversation_id": "conv-tl",
+			}},
+			want: "conv-tl",
+		},
+		{
+			name: "langgraph thread via traceloop",
+			span: &Span{Name: "LangGraph.workflow", Attributes: map[string]interface{}{
+				"traceloop.span.kind":                        "workflow",
+				"traceloop.association.properties.thread_id": "thread556",
+			}},
+			want: "thread556",
+		},
+		{
+			name: "gen_ai.conversation.id wins over the others",
+			span: &Span{Name: "LangGraph.workflow", Attributes: map[string]interface{}{
+				"traceloop.association.properties.thread_id": "thread556",
+				"session.id":             "sess-oi",
+				"gen_ai.conversation.id": "conv-otel",
+			}},
+			want: "conv-otel",
+		},
+		{
+			name: "session.id wins over a traceloop thread",
+			span: &Span{Name: "LangGraph.workflow", Attributes: map[string]interface{}{
+				"traceloop.association.properties.thread_id": "thread556",
+				"session.id": "sess-oi",
+			}},
+			want: "sess-oi",
+		},
+		{
+			name: "an empty value falls through to the next key",
+			span: &Span{Name: "LangGraph.workflow", Attributes: map[string]interface{}{
+				"gen_ai.conversation.id":                     "",
+				"traceloop.association.properties.thread_id": "thread556",
+			}},
+			want: "thread556",
+		},
+		{
+			name: "langsmith thread",
+			span: &Span{Name: "LangGraph", Attributes: map[string]interface{}{
+				"langsmith.metadata.thread_id": "thread-ls",
+			}},
+			want: "thread-ls",
+		},
+		{
+			name: "langsmith session over its thread",
+			span: &Span{Name: "LangGraph", Attributes: map[string]interface{}{
+				"langsmith.metadata.thread_id":  "thread-ls",
+				"langsmith.metadata.session_id": "sess-ls",
+			}},
+			want: "sess-ls",
+		},
+		{
+			name: "the langsmith project is not a conversation",
+			span: &Span{Name: "LangGraph", Attributes: map[string]interface{}{
+				"langsmith.trace.session_id": "project-1",
+			}},
+			want: "",
+		},
+		{
+			name: "unrelated association properties are ignored",
+			span: &Span{Name: "LangGraph.workflow", Attributes: map[string]interface{}{
+				"traceloop.association.properties.passenger_id": "3442 587242",
+				"traceloop.association.properties.user_id":      "user-1",
+			}},
+			want: "",
+		},
+		{
+			name: "no conversation attribute",
+			span: &Span{Name: "LangGraph.workflow", Attributes: map[string]interface{}{
+				"traceloop.span.kind": "workflow",
+			}},
+			want: "",
+		},
+		{
+			name: "a whole number is read, as JSON decodes it",
+			span: &Span{Name: "LangGraph.workflow", Attributes: map[string]interface{}{
+				"traceloop.span.kind":                        "workflow",
+				"traceloop.association.properties.thread_id": float64(556),
+			}},
+			want: "556",
+		},
+		{
+			name: "a fraction or a bool is ignored",
+			span: &Span{Name: "LangGraph.workflow", Attributes: map[string]interface{}{
+				"traceloop.span.kind":    "workflow",
+				"gen_ai.conversation.id": 4.5,
+				"session.id":             true,
+			}},
+			want: "",
+		},
+		{
+			name: "nil span",
+			span: nil,
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			span := tt.span
+			if span != nil {
+				processed := ProcessSpan(*span)
+				span = &processed
+				if len(tt.kinds) > 0 && SpanType(processed.AmpAttributes.Kind) != tt.kinds[0] {
+					t.Fatalf("span kind = %q, want %q (test precondition)", processed.AmpAttributes.Kind, tt.kinds[0])
+				}
+			}
+			if got := ExtractConversationID(span); got != tt.want {
+				t.Errorf("ExtractConversationID() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The CrewAI parser builds AgentData without reading gen_ai.conversation.id,
+// so the conversation ID must come from the attribute fallback.
+func TestExtractConversationID_CrewAIRootFallsBackPastEmptyAgentData(t *testing.T) {
+	span := ProcessSpan(Span{Name: "Crew.kickoff", Attributes: map[string]interface{}{
+		"traceloop.span.kind":    "agent",
+		"gen_ai.system":          "crewai",
+		"crewai.agent.role":      "Researcher",
+		"gen_ai.conversation.id": "conv-crew",
+	}})
+	data, ok := span.AmpAttributes.Data.(AgentData)
+	if !ok || data.Framework != "crewai" {
+		t.Fatalf("expected CrewAI AgentData, got %T (test precondition)", span.AmpAttributes.Data)
+	}
+	if data.ConversationID != "" {
+		t.Fatalf("expected the CrewAI parser to leave ConversationID empty, got %q (test precondition)", data.ConversationID)
+	}
+	if got := ExtractConversationID(&span); got != "conv-crew" {
+		t.Errorf("ExtractConversationID() = %q, want conv-crew", got)
+	}
+}

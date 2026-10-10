@@ -68,6 +68,10 @@ import { EmptyConfigCard } from "./Configure/subComponents/EmptyConfigCard";
 import { EnvironmentVariablesGuideDrawer } from "./Configure/subComponents/EnvironmentVariablesGuideDrawer";
 import { LLMProxyAPIKeysSection } from "./Configure/subComponents/LLMProxyAPIKeysSection";
 import { CONFIGURE_TAB_PARAM } from "./configureTabs";
+import {
+  BUILD_IN_PROGRESS_REASON,
+  useHasBuildInProgress,
+} from "./utils/buildInProgress";
 
 const DURATION_PATTERN = /^\d+(ms|s|m|h)$/;
 
@@ -96,9 +100,44 @@ const EXAMPLE_MODEL_BY_TEMPLATE: Record<string, string> = {
   "azure-openai": "gpt-4o-mini",
   "azureai-foundry": "gpt-4o-mini",
   anthropic: "claude-sonnet-4-5",
-  gemini: "gemini-2.0-flash",
+  gemini: "gemini-3.8-flash",
   mistralai: "mistral-small-latest",
 };
+
+// different providers have different completion endpoints
+function getExampleRequest(
+  templateId: string | undefined,
+  model: string,
+): { path: string; headers: string[]; body: string } {
+  switch (templateId) {
+    case "mistralai":
+      return {
+        path: "/v1/chat/completions",
+        headers: [],
+        body: `{"model": "${model}", "messages": [{"role": "user", "content": "Hi..."}]}`,
+      };
+    case "anthropic":
+      // The Messages API rejects requests without anthropic-version or max_tokens.
+      return {
+        path: "/v1/messages",
+        headers: [`anthropic-version: 2023-06-01`],
+        body: `{"model": "${model}", "max_tokens": 1024, "messages": [{"role": "user", "content": "Hi..."}]}`,
+      };
+    case "gemini":
+      // Gemini takes the model from the path, not the body.
+      return {
+        path: `/v1beta/models/${model}:generateContent`,
+        headers: [],
+        body: `{"contents": [{"parts": [{"text": "Hi..."}]}]}`,
+      };
+    default:
+      return {
+        path: "/chat/completions",
+        headers: [],
+        body: `{"model": "${model}", "messages": [{"role": "user", "content": "Hi..."}]}`,
+      };
+  }
+}
 
 function getClientSetupSnippet(
   templateId: string | undefined,
@@ -292,6 +331,10 @@ export const ViewLLMProviderComponent: React.FC = () => {
   });
 
   const isExternal = agent?.provisioning?.type === "external";
+  const hasBuildInProgress = useHasBuildInProgress(
+    { orgName: orgId, projName: projectId, agentName: agentId },
+    { enabled: !!agent && !isExternal && !agent.kindName },
+  );
 
   const { data: catalogData } = useListCatalogLLMProviders(
     { orgName: orgId },
@@ -973,23 +1016,23 @@ export const ViewLLMProviderComponent: React.FC = () => {
             const headerValue = authEntry?.value || (apiKeyEnvVar ? `$${apiKeyEnvVar.name}` : "<api-key>");
             const entryIsQueryAuth = (authEntry?.in || authIn) === "query";
             const endpointUrl = providerConfig.url || "<endpoint-url>";
-            // Single-quoted: an endpoint carrying a query string or any other shell
-            // metacharacter would otherwise be split by the shell before curl sees it.
-            const requestUrl = `'${endpointUrl}/chat/completions'`;
             const exampleModel =
               EXAMPLE_MODEL_BY_TEMPLATE[catalogProvider?.template ?? ""] ?? "<model-id>";
+            const exampleRequest = getExampleRequest(catalogProvider?.template, exampleModel);
+            const requestUrl = `'${endpointUrl}${exampleRequest.path}'`;
             const curlCode = [
               `curl -X POST ${requestUrl}`,
               // curl sends -d as application/x-www-form-urlencoded unless told
               // otherwise, which every OpenAI-compatible endpoint rejects.
               `  --header "Content-Type: application/json"`,
+              ...exampleRequest.headers.map((h) => `  --header "${h}"`),
               !noAuthRequired && !entryIsQueryAuth ? `  --header "${headerName}: ${headerValue}"` : null,
               // curl encodes the value but expects the name pre-encoded, hence the
               // asymmetry — the value is often a shell variable to expand.
               !noAuthRequired && entryIsQueryAuth
                 ? `  --url-query "${encodeURIComponent(headerName)}=${headerValue}"`
                 : null,
-              `  -d '{"model": "${exampleModel}", "messages": [{"role": "user", "content": "Hi..."}]}'`,
+              `  -d '${exampleRequest.body}'`,
             ]
               .filter(Boolean)
               .join(" \\\n");
@@ -1092,6 +1135,9 @@ export const ViewLLMProviderComponent: React.FC = () => {
         onSave={handleSave}
         isDirty={isDirty}
         isSaving={updateConfig.isPending}
+        saveBlockedReason={
+          hasBuildInProgress ? BUILD_IN_PROGRESS_REASON : undefined
+        }
         hasInvalidNames={hasEmptyEnvVarName}
         error={updateConfig.isError ? updateConfig.error : undefined}
         description={
@@ -1323,6 +1369,9 @@ export const ViewLLMProviderComponent: React.FC = () => {
               />
             </Stack>
 
+            {isDirty && hasBuildInProgress && (
+              <Alert severity="warning">{BUILD_IN_PROGRESS_REASON}</Alert>
+            )}
             {isDirty && (
               <Stack direction="row" spacing={1} justifyContent="flex-end">
                 <Button
@@ -1339,7 +1388,11 @@ export const ViewLLMProviderComponent: React.FC = () => {
                   variant="contained"
                   size="small"
                   onClick={handleSave}
-                  disabled={updateConfig.isPending || hasEmptyEnvVarName}
+                  disabled={
+                    updateConfig.isPending ||
+                    hasEmptyEnvVarName ||
+                    hasBuildInProgress
+                  }
                 >
                   {updateConfig.isPending ? "Saving…" : "Save"}
                 </Button>

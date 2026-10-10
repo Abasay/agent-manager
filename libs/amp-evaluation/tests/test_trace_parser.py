@@ -515,7 +515,7 @@ class TestRealOTELTraces:
         fixtures_path = Path(__file__).parent / "fixtures" / "sample_traces.json"
         if not fixtures_path.exists():
             pytest.skip("Sample traces fixture not found")
-        with open(fixtures_path) as f:
+        with fixtures_path.open(encoding="utf-8") as f:
             data = json.load(f)
         return data["traces"]
 

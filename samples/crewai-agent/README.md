@@ -96,4 +96,5 @@ curl -s localhost:8000/chat \
 ## Notes
 
 - Pinned to `crewai==1.1.0` for dependency compatibility.
+- Each request's `session_id` is attached to its trace as `traceloop.association.properties.session_id`, so the Traces page's Conversation column shows it and can filter on it. Local runs without the platform's instrumentation skip this.
 - The app disables CrewAI's hosted tracing and its interactive trace prompt so it runs non-interactively, and it uses the bundled model pricing data to avoid a network fetch on startup.

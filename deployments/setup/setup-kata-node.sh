@@ -23,7 +23,7 @@
 #      registry mirror config (`/etc/rancher/k3s/registries.yaml`) — without these, image pulls
 #      for anything built by the workflow plane fail with "no such host" / TLS errors.
 #   5. Hands off to install-kata.sh (the production kata-deploy path) with this node as the
-#      target — which also auto-detects and wires k3s's containerd (see install-kata.sh).
+#      target — kata-deploy's Helm chart wires k3s's containerd itself (see install-kata.sh).
 #
 # This is a DEV/TEST tool for exercising the Kata tier locally. It is NOT what a real customer
 # would do — a production cluster wouldn't have `host.k3d.internal` at all, and would just run
@@ -157,7 +157,7 @@ if [ "${HOSTS_CHANGED:-false}" = "true" ] || [ "$REGISTRIES_CHANGED" = "true" ];
 fi
 
 # --- 4. Hand off to the production Kata installer, targeting this node ---
-# install-kata.sh also auto-detects and wires k3s's containerd (kata-deploy alone doesn't).
+# install-kata.sh detects k3s and tells kata-deploy's chart to wire k3s's containerd.
 echo ""
 echo "🚀 Installing Kata on ${THIS_NODE} via install-kata.sh..."
 KATA_NODES="${THIS_NODE}" bash "$SCRIPT_DIR/install-kata.sh"

@@ -19,7 +19,7 @@ Console exactly like auto-instrumented ones.
 
 It emits a span for every kind in the contract, with every attribute, so it
 doubles as an executable reference. For the full supported schema, see
-[the contract](https://wso2.github.io/agent-manager/docs/latest/guides/amp-instrumentation/#the-contract)
+[the contract](https://wso2.com/agent-platform/docs/latest/guides/amp-instrumentation/#the-contract)
 in the WSO2 Agent Manager documentation.
 
 ## How it works
@@ -68,7 +68,7 @@ standardized yet.
 | any span | `evaluation_baggage` | W3C baggage `task_id` / `trial_id`, which correlates the trace to an evaluation trial |
 
 This table is a quick map. The authoritative reference, with every attribute and
-whether it's required, is [the contract](https://wso2.github.io/agent-manager/docs/latest/guides/amp-instrumentation/#the-contract).
+whether it's required, is [the contract](https://wso2.com/agent-platform/docs/latest/guides/amp-instrumentation/#the-contract).
 
 ## Prerequisites
 
@@ -80,7 +80,7 @@ whether it's required, is [the contract](https://wso2.github.io/agent-manager/do
 ## Run it externally-hosted
 
 First register the agent in the AMP Console and generate its API key. Follow
-[Register an externally-hosted agent](https://wso2.github.io/agent-manager/docs/latest/tutorials/create-your-first-agent/#register-an-externally-hosted-agent).
+[Register an externally-hosted agent](https://wso2.com/agent-platform/docs/latest/tutorials/create-your-first-agent/#register-an-externally-hosted-agent).
 That gives you the OTLP endpoint and the `AMP_AGENT_API_KEY`.
 
 Then set the two AMP environment variables yourself and run the agent:
@@ -109,7 +109,7 @@ instead of the auto-instrumentation init container. The trait still supplies
 `AMP_OTEL_ENDPOINT` and `AMP_AGENT_API_KEY`, so the agent has what it needs to
 export. It just does the instrumentation itself.
 
-Follow [Create a platform-hosted agent](https://wso2.github.io/agent-manager/docs/latest/tutorials/create-your-first-agent/#create-a-platform-hosted-agent)
+Follow [Create a platform-hosted agent](https://wso2.com/agent-platform/docs/latest/tutorials/create-your-first-agent/#create-a-platform-hosted-agent)
 for the full walkthrough. Use these values in the create-agent form:
 
 | Field | Value |

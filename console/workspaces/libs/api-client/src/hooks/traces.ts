@@ -21,6 +21,7 @@ import {
   type TraceListTimeRange,
   type GetTraceListPathParams,
   type TraceExportResponse,
+  type TraceFilters,
   getTimeRange
 } from "@agent-management-platform/types";
 import {
@@ -28,6 +29,7 @@ import {
   exportTraces,
   getSpanDetail,
   listTraceSpans,
+  normalizeTraceFilters,
   type ObserverTraceListParams,
 } from "../apis/traces";
 import { getAgentTraceScores } from "../apis/monitors";
@@ -61,11 +63,12 @@ async function fetchScoreMap(
   limit: number,
   sortOrder: string,
   getToken: (() => Promise<string>) | undefined,
+  offset = 0,
 ): Promise<Map<string, { score?: number | null; totalCount: number; skippedCount: number }>> {
   try {
     const res = await getAgentTraceScores(
       {
-        orgName, projName, agentName, startTime, endTime, limit, offset: 0,
+        orgName, projName, agentName, startTime, endTime, limit, offset,
         sortOrder: sortOrder as "asc" | "desc"
       },
       getToken,
@@ -89,10 +92,63 @@ async function fetchScoreMap(
   }
 }
 
+/** Highest limit the scores endpoint accepts. */
+const MAX_SCORES_PER_REQUEST = 100;
+
+/** Most score requests made for one page of traces. */
+const MAX_SCORE_PAGES = 10;
+
+/** Widens a page's score window to absorb timestamp precision differences. */
+const SCORE_WINDOW_PAD_MS = 1000;
+
+/** Fetch scores for one page of traces, bounded by the span of their start times. */
+async function fetchPageScoreMap(
+  scope: { organization: string; project: string; component: string; sortOrder?: string },
+  traces: TraceListResponse["traces"] | undefined,
+  getToken: (() => Promise<string>) | undefined,
+): ReturnType<typeof fetchScoreMap> {
+  if (!traces?.length) return new Map();
+  const times = traces.map((t) => new Date(t.startTime).getTime());
+  const startTime = new Date(Math.min(...times) - SCORE_WINDOW_PAD_MS).toISOString();
+  const endTime = new Date(Math.max(...times) + SCORE_WINDOW_PAD_MS).toISOString();
+  const missing = new Set(traces.map((t) => t.traceId));
+  const map: Awaited<ReturnType<typeof fetchScoreMap>> = new Map();
+  // Other scored traces can sit between a filtered page's matches, so page until all are found.
+  for (let i = 0; i < MAX_SCORE_PAGES && missing.size > 0; i += 1) {
+    const batch = await fetchScoreMap(
+      scope.organization,
+      scope.project,
+      scope.component,
+      startTime,
+      endTime,
+      MAX_SCORES_PER_REQUEST,
+      scope.sortOrder ?? "desc",
+      getToken,
+      i * MAX_SCORES_PER_REQUEST,
+    );
+    for (const [id, s] of batch) {
+      if (missing.delete(id)) map.set(id, s);
+    }
+    if (batch.size < MAX_SCORES_PER_REQUEST) break;
+  }
+  return map;
+}
+
 export type TraceListWithRange = TraceListResponse & {
   fetchedRange: { startTime: string; endTime: string };
 };
 
+export interface TraceListOptions {
+  enableAutoRefresh?: boolean;
+  enabled?: boolean;
+  filters?: TraceFilters;
+  /** Fill models on every trace; costs the server one extra upstream call per trace. */
+  includeModels?: boolean;
+  /** Turns off focus and reconnect refetches, which would drop pages loaded with loadMore. */
+  paged?: boolean;
+}
+
+/** Trace list for the window and filters, with cursor paging, newer-trace polling and scores. */
 export function useTraceList(
   organization?: string,
   project?: string,
@@ -103,14 +159,21 @@ export function useTraceList(
   sortOrder?: GetTraceListPathParams["sortOrder"] | undefined,
   customStartTime?: string,
   customEndTime?: string,
-  options?: { enableAutoRefresh?: boolean; enabled?: boolean },
+  options?: TraceListOptions,
 ) {
   const { getToken } = useAuthHooks();
   const hasCustomRange = !!customStartTime && !!customEndTime;
   const pageSize = limit ?? 10;
   const [traceList, setTraceList] = useState<TraceListWithRange | null>(null);
-  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isLoadingNewer, setIsLoadingNewer] = useState(false);
+  const [loadError, setLoadError] = useState<Error | null>(null);
+
+  // Keyed by value so a caller passing a fresh object each render doesn't reset the list.
+  const filtersKey = JSON.stringify(normalizeTraceFilters(options?.filters));
+  const filters = useMemo<TraceFilters>(() => JSON.parse(filtersKey), [filtersKey]);
+  const hasFilters = filtersKey !== "{}";
+  const includeModels = options?.includeModels === true;
 
   // Non-time params — stable across refetches while org/project/etc don't change.
   const scopeParams = useMemo(() => {
@@ -123,15 +186,27 @@ export function useTraceList(
       environment,
       limit: pageSize,
       sortOrder,
+      filters,
+      includeModels,
     };
-  }, [organization, project, component, environment, pageSize, sortOrder]);
+  }, [organization, project, component, environment, pageSize, sortOrder, filters, includeModels]);
 
   // Tracks the time range used in the most recent successful fetch so that
-  // loadOlder / loadNewer paginate against the same window.
+  // loadMore / loadNewer paginate against the same window.
   const lastFetchedRangeRef = useRef<{
     startTime: string;
     endTime: string;
   } | null>(null);
+
+  // Server cursor for the next page in sort order; loadMore sends it with the unchanged window.
+  const nextCursorRef = useRef<string | undefined>(undefined);
+
+  // Bumped on each reset and new first page; a loadMore from an earlier list leaves state alone.
+  const listGenerationRef = useRef(0);
+
+  // Latest list, read by the auto-refresh interval and by loadMore to tell new rows.
+  const traceListRef = useRef(traceList);
+  useEffect(() => { traceListRef.current = traceList; }, [traceList]);
 
   const queryResult = useApiQuery({
     queryKey: [
@@ -145,6 +220,8 @@ export function useTraceList(
       sortOrder,
       customStartTime,
       customEndTime,
+      filters,
+      includeModels,
     ],
     queryFn: async () => {
       if (!scopeParams) {
@@ -158,37 +235,56 @@ export function useTraceList(
 
       lastFetchedRangeRef.current = range;
 
-      const [res, scoreMap] = await Promise.all([
-        getTraceList({ ...scopeParams, ...range }, getToken),
-        fetchScoreMap(
-          scopeParams.organization,
-          scopeParams.project,
-          scopeParams.component,
-          range.startTime,
-          range.endTime,
-          // Use the same page size as the trace list; scores now support sortOrder
-          // so their result set aligns with the current page.
-          scopeParams.limit,
-          scopeParams.sortOrder ?? "desc",
-          getToken,
-        ),
-      ]);
+      let res: TraceListResponse;
+      let scoreMap: Awaited<ReturnType<typeof fetchScoreMap>>;
+      if (hasFilters) {
+        // Matches can sit anywhere in the window, so score the returned page itself.
+        res = await getTraceList({ ...scopeParams, ...range }, getToken);
+        scoreMap = await fetchPageScoreMap(scopeParams, res.traces, getToken);
+      } else {
+        [res, scoreMap] = await Promise.all([
+          getTraceList({ ...scopeParams, ...range }, getToken),
+          fetchScoreMap(
+            scopeParams.organization,
+            scopeParams.project,
+            scopeParams.component,
+            range.startTime,
+            range.endTime,
+            // Use the same page size as the trace list; scores now support sortOrder
+            // so their result set aligns with the current page.
+            scopeParams.limit,
+            scopeParams.sortOrder ?? "desc",
+            getToken,
+          ),
+        ]);
+      }
+      // A filtered page can be empty yet still carry nextCursor and truncated.
       if (res.totalCount === 0) {
-        return { traces: [], totalCount: 0, fetchedRange: range } as TraceListWithRange;
+        return { ...res, traces: [], fetchedRange: range } as TraceListWithRange;
       }
       return { ...res, traces: applyScores(res.traces, scoreMap), fetchedRange: range };
     },
     enabled: (options?.enabled ?? true) && !!scopeParams && (hasCustomRange || !!timeRange),
+    // A focus or reconnect refetch replaces the list and drops pages loaded with loadMore.
+    ...(options?.paged && { refetchOnWindowFocus: false, refetchOnReconnect: false }),
   });
 
   useEffect(() => {
+    listGenerationRef.current += 1;
     setTraceList(null);
+    setLoadError(null);
+    setIsLoadingMore(false);
     lastFetchedRangeRef.current = null;
+    nextCursorRef.current = undefined;
   }, [scopeParams, timeRange, customStartTime, customEndTime]);
 
   useEffect(() => {
     if (!queryResult.data) return;
+    listGenerationRef.current += 1;
     setTraceList(queryResult.data);
+    setLoadError(null);
+    setIsLoadingMore(false);
+    nextCursorRef.current = queryResult.data.nextCursor;
     // Restore the range ref when React Query serves from cache without re-running
     // queryFn (which is where the ref is normally set after a live fetch).
     // Use the concrete window embedded in the result instead of recomputing from
@@ -229,50 +325,54 @@ export function useTraceList(
     [sortOrder],
   );
 
-  const [loadError, setLoadError] = useState<Error | null>(null);
-
-  const loadOlder = useCallback(async () => {
+  // Fetches the page after `cursor` over the first page's unchanged window and merges it in.
+  // Returns the next cursor and whether the page added rows, or undefined if the list moved on.
+  const fetchCursorPage = useCallback(async (cursor: string) => {
     const range = lastFetchedRangeRef.current;
-    if (!scopeParams || !range || !traceList?.traces?.length || isLoadingOlder) return;
+    if (!scopeParams || !range) return undefined;
 
-    const oldest = traceList.traces.reduce((acc, trace) =>
-      new Date(trace.startTime).getTime() < new Date(acc.startTime).getTime() ? trace : acc,
-    );
+    const response = await getTraceList({ ...scopeParams, ...range, cursor }, getToken);
+    const scoreMap = await fetchPageScoreMap(scopeParams, response.traces, getToken);
+    // A refetch, scope change or concurrent call moved the cursor while this page was in flight.
+    if (nextCursorRef.current !== cursor) return undefined;
 
-    setIsLoadingOlder(true);
+    nextCursorRef.current = response.nextCursor;
+    const traces = applyScores(response.traces ?? [], scoreMap);
+    const shown = new Set(traceListRef.current?.traces.map((t) => t.traceId));
+    const added = traces.some((t) => !shown.has(t.traceId));
+    setTraceList((prev) => {
+      const merged = mergeTraces(prev, { ...response, traces });
+      return merged && {
+        ...merged,
+        nextCursor: response.nextCursor,
+        truncated: response.truncated,
+        lookedBackTo: response.lookedBackTo,
+      };
+    });
+    return { nextCursor: response.nextCursor, added };
+  }, [scopeParams, getToken, mergeTraces]);
+
+  /** Loads the next page; resolves to whether it added rows, or undefined if the list moved on. */
+  const loadMore = useCallback(async () => {
+    const cursor = nextCursorRef.current;
+    if (!cursor || isLoadingMore) return;
+
+    const generation = listGenerationRef.current;
+    setLoadError(null);
+    setIsLoadingMore(true);
     try {
-      const subRange = { ...range, endTime: oldest.startTime };
-      const [response, scoreMap] = await Promise.all([
-        getTraceList(
-          // Use scopeParams.limit (= pageSize) as the per-call cap.
-          // Use oldest.startTime as the boundary; mergeTraces deduplicates any overlap.
-          { ...scopeParams, ...subRange },
-          getToken,
-        ),
-        fetchScoreMap(
-          scopeParams.organization,
-          scopeParams.project,
-          scopeParams.component,
-          subRange.startTime,
-          subRange.endTime,
-          // Use the same page size as the trace list; scores now support sortOrder
-          // so their result set aligns with the current page.
-          scopeParams.limit,
-          scopeParams.sortOrder ?? "desc",
-          getToken,
-        ),
-      ]);
-      if ((response.traces?.length ?? 0) > 0) {
-        const enriched = { ...response, traces: applyScores(response.traces, scoreMap) };
-        setTraceList((prev) => mergeTraces(prev, enriched));
-      }
+      const page = await fetchCursorPage(cursor);
+      if (generation === listGenerationRef.current) return page?.added;
     } catch (err) {
-      setLoadError(err instanceof Error ? err : new Error(String(err)));
+      if (generation === listGenerationRef.current) {
+        setLoadError(err instanceof Error ? err : new Error(String(err)));
+      }
     } finally {
-      setIsLoadingOlder(false);
+      if (generation === listGenerationRef.current) setIsLoadingMore(false);
     }
-  }, [scopeParams, traceList, isLoadingOlder, getToken, mergeTraces]);
+  }, [isLoadingMore, fetchCursorPage]);
 
+  // Used only by auto-refresh; Refresh is how the traces page shows new traces.
   const loadNewer = useCallback(async () => {
     const range = lastFetchedRangeRef.current;
     if (!scopeParams || !range || !traceList?.traces?.length || isLoadingNewer) return;
@@ -319,51 +419,18 @@ export function useTraceList(
     }
   }, [scopeParams, traceList, isLoadingNewer, hasCustomRange, getToken, mergeTraces]);
 
+  // Walks cursor pages until the window runs out, capped at 50 pages.
   const fullLoad = useCallback(async () => {
-    const range = lastFetchedRangeRef.current;
-    if (!scopeParams || !range || !traceList?.traces?.length) return;
-
-    const findOldest = (traces: TraceListResponse["traces"]) =>
-      traces.reduce((acc, trace) =>
-        new Date(trace.startTime).getTime() < new Date(acc.startTime).getTime() ? trace : acc,
-      );
-
-    let localOldestCursor = findOldest(traceList.traces).startTime;
-
-    for (let i = 0; i < 50; i += 1) {
-      let response: TraceListResponse;
+    let cursor = nextCursorRef.current;
+    for (let i = 0; i < 50 && cursor; i += 1) {
       try {
-        // Use scopeParams.limit (= pageSize) as the per-call cap.
-        response = await getTraceList(
-          { ...scopeParams, ...range, endTime: localOldestCursor },
-          getToken,
-        );
+        cursor = (await fetchCursorPage(cursor))?.nextCursor;
       } catch (err) {
         setLoadError(err instanceof Error ? err : new Error(String(err)));
         break;
       }
-
-      if (!response.traces?.length) break;
-
-      const scoreMap = await fetchScoreMap(
-        scopeParams.organization,
-        scopeParams.project,
-        scopeParams.component,
-        range.startTime,
-        localOldestCursor,
-        scopeParams.limit,
-        scopeParams.sortOrder ?? "desc",
-        getToken,
-      );
-      const enriched = { ...response, traces: applyScores(response.traces, scoreMap) };
-      setTraceList((prev) => mergeTraces(prev, enriched));
-      const nextOldest = findOldest(response.traces).startTime;
-      // Convergence: stop when the cursor didn't advance or page was smaller than
-      // the page size (indicating the server has no more results).
-      if (nextOldest === localOldestCursor || response.traces.length < pageSize) break;
-      localOldestCursor = nextOldest;
     }
-  }, [scopeParams, traceList, pageSize, getToken, mergeTraces]);
+  }, [fetchCursorPage]);
 
   // Stable refs so the interval always calls the latest versions without
   // being torn down and recreated on every render.
@@ -372,9 +439,6 @@ export function useTraceList(
 
   const refetchRef = useRef(queryResult.refetch);
   useEffect(() => { refetchRef.current = queryResult.refetch; }, [queryResult.refetch]);
-
-  const traceListRef = useRef(traceList);
-  useEffect(() => { traceListRef.current = traceList; }, [traceList]);
 
   // Auto-refresh: incrementally load newer traces every 30 s instead of
   // replacing the whole list. Falls back to a full refetch when the list is
@@ -392,15 +456,18 @@ export function useTraceList(
     return () => clearInterval(timer);
   }, [hasCustomRange, scopeParams, options?.enabled, options?.enableAutoRefresh]);
 
+  const current = traceList ?? queryResult.data;
+
   return {
     ...queryResult,
-    data: traceList ?? queryResult.data,
-    traceList: traceList ?? queryResult.data,
-    loadOlder,
-    loadNewer,
+    data: current,
+    traceList: current,
+    loadMore,
     fullLoad,
-    isLoadingOlder,
-    isLoadingNewer,
+    hasMore: !!current?.nextCursor,
+    truncated: current?.truncated ?? false,
+    lookedBackTo: current?.lookedBackTo,
+    isLoadingMore,
     loadError,
   };
 }
@@ -473,7 +540,7 @@ export function useSpanDetail(
 
 export type ExportTracesParams = Pick<
   ObserverTraceListParams,
-  "startTime" | "endTime" | "limit" | "sortOrder"
+  "startTime" | "endTime" | "limit" | "sortOrder" | "filters"
 > & {
   organization: string;
   project: string;
@@ -481,6 +548,7 @@ export type ExportTracesParams = Pick<
   environment: string;
 };
 
+/** Mutation that exports traces for the current window and filters. */
 export function useExportTraces() {
   const { getToken } = useAuthHooks();
 
@@ -498,6 +566,7 @@ export function useExportTraces() {
         endTime,
         limit,
         sortOrder,
+        filters,
       } = params;
 
       return exportTraces(
@@ -510,6 +579,7 @@ export function useExportTraces() {
           endTime,
           limit,
           sortOrder,
+          filters,
         },
         getToken,
       );

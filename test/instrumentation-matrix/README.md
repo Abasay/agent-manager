@@ -37,6 +37,9 @@ nox -s emission -- --cell-id=traceloop-0.61.0-langchain-0.3.27-py3.11
 # all cells for one framework
 nox -s emission -k langchain
 
+# all cells for one Python version (how CI shards the matrix)
+nox -s emission -- --python-version=3.11
+
 # the full emission matrix
 nox -s emission
 

@@ -23,6 +23,10 @@ import os
 import logging
 import sys
 import threading
+
+from opentelemetry import trace
+
+from ..conversation import add_conversation_id_processor
 from . import constants as env_vars
 
 # Track initialization state with thread safety
@@ -126,6 +130,9 @@ def initialize_instrumentation() -> None:
                 headers={"x-amp-api-key": api_key},
                 resource_attributes=resource_attributes,
             )
+
+            # Traceloop installs its provider globally; add to it, keeping Traceloop's processor.
+            add_conversation_id_processor(trace.get_tracer_provider())
 
             _initialized = True
             logger.info("Instrumentation initialized successfully.")
