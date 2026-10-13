@@ -115,15 +115,15 @@ def check(tool_name: str, args: dict[str, Any], project_key: str) -> str | None:
         m = _ISSUE_KEY.match(ref)
         if not m:
             return (
-                f"Refer to the issue by its key (for example {project_key}-123), "
-                f"not {ref!r}, so the project can be checked."
+                f"Refer to the issue by its full key ({project_key}- followed by "
+                f"the number), not {ref!r}, so the project can be checked."
             )
         if m.group(1) != project_key:
             return f"Writes are limited to Jira project {project_key}; {ref} is not in it."
     if not projects and not issues:
         return (
             f"{tool_name} did not say which project or issue it changes. Pass project "
-            f"{project_key} or an issue key like {project_key}-123."
+            f"{project_key} or the full key of an issue in it."
         )
     return None
 

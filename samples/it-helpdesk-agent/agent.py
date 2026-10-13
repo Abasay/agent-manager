@@ -23,6 +23,7 @@ Confluence pages, and guard.py limits Jira writes to that project.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any
@@ -37,6 +38,11 @@ from tools import build_tools
 log = logging.getLogger("it-helpdesk")
 
 MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
+
+# Seconds one MCP tool call may take before the agent gives up on it. Keep it
+# under the gateway's route timeout (30s by default), so the agent reports the
+# slow call itself instead of the gateway failing the whole chat with a 504.
+MCP_TOOL_TIMEOUT = float(os.getenv("MCP_TOOL_TIMEOUT", "25"))
 
 SYSTEM_PROMPT_TEMPLATE = (
     "You are an IT helpdesk agent for {company_name}. "
@@ -110,7 +116,8 @@ JIRA_MODE_PROMPT_TEMPLATE = (
     "move the issue to another status. Ask the employee to confirm before "
     "moving an issue to Done or closing it. Never delete an issue, never change "
     "its reporter, and never touch another project. Always refer to issues by "
-    "key (for example {project_key}-123).\n"
+    "their full key ({project_key}- followed by the number), and only use keys "
+    "the employee gave you or a search returned.\n"
     "6. NO ADMIN ACTIONS: You cannot reset passwords, grant software access or "
     "change accounts yourself. For those, create a task labelled "
     "'{l2_label}' plus one of 'password-reset', 'access-request' or 'security', "
@@ -176,7 +183,9 @@ async def load_mcp_tools(cfg: Config) -> list[Any]:
     if not connections:
         return []
 
-    interceptors = []
+    # First in the list is outermost, so _safe_call also catches anything the
+    # Jira guard's handler raises.
+    interceptors: list[Any] = [_safe_call]
     if cfg.jira_mode:
         from guard import jira_write_guard
 
@@ -205,6 +214,43 @@ async def load_mcp_tools(cfg: Config) -> list[Any]:
             tool.metadata = {**(tool.metadata or {}), "mcp_server": name}
             tools.append(tool)
     return tools
+
+
+def _tool_error(text: str) -> Any:
+    from mcp.types import CallToolResult, TextContent
+
+    return CallToolResult(content=[TextContent(type="text", text=text)], isError=True)
+
+
+async def _safe_call(request: Any, handler: Any) -> Any:
+    """Turn a slow or failed MCP call into a tool error the model can read.
+
+    Without this, a timeout or a gateway 5xx raises out of the tool node, the
+    chat request fails, and the conversation is left holding a tool call with no
+    result, which the model API rejects on every later turn of that session.
+    """
+    try:
+        return await asyncio.wait_for(handler(request), MCP_TOOL_TIMEOUT)
+    except asyncio.TimeoutError:
+        log.warning(
+            "MCP call %s on %s timed out after %ss",
+            request.name, request.server_name, MCP_TOOL_TIMEOUT,
+        )
+        return _tool_error(
+            f"ERROR: {request.server_name} did not answer within "
+            f"{MCP_TOOL_TIMEOUT:g} seconds. Tell the employee the system is slow "
+            "right now and offer to try again; do not repeat the call more than once."
+        )
+    except Exception as exc:  # noqa: BLE001 - any transport failure, incl. ExceptionGroup
+        log.exception("MCP call %s on %s failed", request.name, request.server_name)
+        # Transport errors arrive wrapped in an ExceptionGroup; report the cause.
+        while isinstance(exc, BaseExceptionGroup) and exc.exceptions:
+            exc = exc.exceptions[0]
+        detail = (str(exc).splitlines() or [type(exc).__name__])[0][:200]
+        return _tool_error(
+            f"ERROR: the call to {request.server_name} failed ({detail}). Tell the "
+            "employee the system could not be reached and offer to try again."
+        )
 
 
 def _loaded_servers(cfg: Config, mcp_tools: list[Any] | None) -> list[str]:

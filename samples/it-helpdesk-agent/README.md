@@ -44,6 +44,7 @@ All configuration is environment variables. Only the LLM credential is required.
 | `JIRA_ISSUE_TYPE` | `Task` | Issue type for new tickets (`jira` mode) |
 | `JIRA_OUTAGE_LABEL` | `outage` | Label marking known-outage issues (`jira` mode) |
 | `JIRA_L2_LABEL` | `l2` | Label on tasks routed to IT staff (`jira` mode) |
+| `MCP_TOOL_TIMEOUT` | `25` | Seconds one MCP tool call may take before the agent reports it as slow instead of waiting for the gateway to fail the chat. Keep it under the gateway route timeout |
 | `CONFLUENCE_SPACE_KEY` | — | Confluence space holding IT policies (`jira` mode); without it the agent says it has no policy source |
 
 `LLM_PROVIDER_*` and `GITHUB_*` are **system-managed** — Agent Manager writes them
