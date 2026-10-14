@@ -177,17 +177,22 @@ async def load_github_tools(cfg: Config) -> list[Any]:
 
 def build_llm(cfg: Config) -> ChatOpenAI:
     if cfg.use_llm_provider:
-        # Via the AM gateway, with the URL and key Agent Manager injects. The
-        # gateway swaps in the real upstream key and applies guardrails. The key
-        # goes in the API-Key header unless the proxy's security names another
-        # (LLM_PROVIDER_AUTH_HEADER).
+        # Via the AM gateway: the agent holds only a gateway key; the gateway
+        # swaps in the real upstream key and applies guardrails. Optional
+        # overrides: LLM_GATEWAY_URL, LLM_GATEWAY_KEY, LLM_PROVIDER_AUTH_HEADER
+        # (default API-Key) and LLM_GATEWAY_PATH_SUFFIX.
         header = os.getenv("LLM_PROVIDER_AUTH_HEADER", "API-Key")
+        base_url = (os.getenv("LLM_GATEWAY_URL") or cfg.llm_provider_url).rstrip("/")
+        suffix = os.getenv("LLM_GATEWAY_PATH_SUFFIX", "")
+        if suffix and not base_url.endswith(suffix):
+            base_url += suffix
+        key = os.getenv("LLM_GATEWAY_KEY") or cfg.llm_provider_key
         return ChatOpenAI(
             model=MODEL,
             temperature=0,
-            base_url=cfg.llm_provider_url.rstrip("/"),
+            base_url=base_url,
             api_key="not-used",
-            default_headers={header: cfg.llm_provider_key, "Authorization": ""},
+            default_headers={header: key, "Authorization": ""},
         )
     return ChatOpenAI(
         model=MODEL,

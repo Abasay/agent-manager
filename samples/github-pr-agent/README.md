@@ -55,7 +55,6 @@ failing the chat, and results over `MAX_TOOL_RESULT_CHARS` are cut with a note.
 | `GITHUB_DEFAULT_MERGE_METHOD` | first allowed | Used unless you ask for another |
 | `GITHUB_ALLOW_APPROVE` | `false` | Allow the agent to submit APPROVE reviews |
 | `USE_LLM_PROVIDER` | `false` | Route model calls through an Agent Manager LLM provider (`LLM_PROVIDER_URL` / `LLM_PROVIDER_KEY` are injected) |
-| `LLM_PROVIDER_AUTH_HEADER` | `API-Key` | Header the LLM proxy expects the key in, if its security names a different one |
 | `OPENAI_API_KEY` / `OPENAI_BASE_URL` | — | Direct model access when not using the LLM provider |
 | `LLM_MODEL` | `gpt-4o-mini` | Model name |
 | `MCP_TOOL_TIMEOUT` | `25` | Seconds one GitHub call may take; keep it under the gateway route timeout |
