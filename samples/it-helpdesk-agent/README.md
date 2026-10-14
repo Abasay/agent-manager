@@ -38,6 +38,14 @@ All configuration is environment variables. Only the LLM credential is required.
 | `USE_MCP` | `false` | Load tools from an MCP proxy in addition to the in-process ones |
 | `GITHUB_MCP_URL` / `GITHUB_MCP_API_KEY` | — | Injected by Agent Manager when the `GitHub` MCP proxy is attached (set these names under **Environment Variable Names** when attaching; the console defaults to `GITHUB_URL` / `GITHUB_API_KEY`); required when `USE_MCP=true` |
 | `ISSUE_TRACKER_REPO` | — | `owner/repo` of the IT team's known-issue tracker. Required when `USE_MCP=true`; issue searches are scoped to it |
+| `DATA_MODE` | `mock` | `mock` uses the bundled fixtures; `jira` works only on real systems. See [Real data mode](#real-data-mode-jira) |
+| `JIRA_PROJECT_KEY` | — | Jira project the agent searches; in `jira` mode, the only project it may change |
+| `JIRA_CLOUD_ID` | — | Atlassian site hostname or cloud ID passed to every Jira tool call |
+| `JIRA_ISSUE_TYPE` | `Task` | Issue type for new tickets (`jira` mode) |
+| `JIRA_OUTAGE_LABEL` | `outage` | Label marking known-outage issues (`jira` mode) |
+| `JIRA_L2_LABEL` | `l2` | Label on tasks routed to IT staff (`jira` mode) |
+| `MCP_TOOL_TIMEOUT` | `25` | Seconds one MCP tool call may take before the agent reports it as slow instead of waiting for the gateway to fail the chat. Keep it under the gateway route timeout |
+| `CONFLUENCE_SPACE_KEY` | — | Confluence space holding IT policies (`jira` mode); without it the agent says it has no policy source |
 
 `LLM_PROVIDER_*` and `GITHUB_*` are **system-managed** — Agent Manager writes them
 per environment and they are read-only in the console. You never paste an upstream
@@ -80,12 +88,52 @@ Mock data lives in `data/` and resets on restart; nothing is persisted.
 Useful for exercising the rules: `alice.chen@acmecorp.com` / `E-1001` is a normal
 Engineering account; `david.kim@acmecorp.com` / `E-1004` is an admin account.
 
+## Real data mode (Jira)
+
+With `DATA_MODE=jira` the nine fixture-backed tools are switched off and nothing
+comes from `data/`. The agent works only through the Jira (and Confluence) MCP
+proxy:
+
+| Need | Where it comes from |
+|---|---|
+| Who is asking | The requester's work email, resolved to one Jira account |
+| Their tickets | Issues in `JIRA_PROJECT_KEY` they reported |
+| New tickets | Created in `JIRA_PROJECT_KEY` as `JIRA_ISSUE_TYPE` |
+| Known outages | Open issues in the project labelled `JIRA_OUTAGE_LABEL` |
+| Password reset, software access, escalation | A task labelled `JIRA_L2_LABEL` plus `password-reset`, `access-request` or `security`, for IT staff |
+| IT policies | Confluence pages in `CONFLUENCE_SPACE_KEY` |
+
+The agent may create issues, edit their summary, description, priority and
+labels, comment, and change status, only on the requester's own issues in
+`JIRA_PROJECT_KEY`. `guard.py` enforces that in code on every Jira tool call,
+whatever the model decides: deletes and Confluence writes are refused, and so
+is any write that targets another project or does not name its target. The
+model gets a `BLOCKED:` tool error and explains it.
+
+Minimum configuration:
+
+```env
+USE_MCP=true
+MCP_SERVERS=jira
+JIRA_MCP_URL=<proxy url>
+JIRA_MCP_API_KEY=<proxy key>
+DATA_MODE=jira
+JIRA_PROJECT_KEY=IT
+JIRA_CLOUD_ID=yourcompany.atlassian.net
+```
+
+The Jira account behind the MCP proxy needs permission to browse, create, edit,
+comment on and transition issues in that project, and to look up users. Setting
+the reporter to the requester also needs the *Modify Reporter* permission;
+without it the agent records the requester in the description instead.
+
 ## Layout
 
 ```
 agent.py               LLM binding, system prompt, MCP tool loading, checkpointer
 app.py                 FastAPI app — /chat and /health
 config.py              Environment configuration
+guard.py               Code-level limits on Jira writes (DATA_MODE=jira)
 main.py                Entrypoint (python main.py)
 tools.py               The nine in-process tools
 clients/               Mock backends behind the tools

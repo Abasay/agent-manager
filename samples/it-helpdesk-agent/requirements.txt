@@ -6,7 +6,7 @@ langgraph>=0.5.0
 
 # Only needed when USE_MCP=true. Supplies MultiServerMCPClient, which turns the
 # tools an MCP server advertises into LangChain tools.
-langchain-mcp-adapters>=0.1.0
+langchain-mcp-adapters>=0.3.0
 
 fastapi==0.139.0
 uvicorn[standard]==0.47.0
